@@ -110,7 +110,12 @@ impl Iterator for TestFileIterator {
                 continue;
             }
 
-            for (index, chr) in line.chars().enumerate() {
+            let mut chars = line.chars().peekable();
+            let mut line_count = 0u32;
+
+            while let Some(chr) = chars.next() {
+                line_count += 1;
+
                 if ignore_next {
                     ignore_next = false;
                     continue;
@@ -122,7 +127,7 @@ impl Iterator for TestFileIterator {
                     }
 
                     '-' => {
-                        if let Some(next) = line.chars().nth(index + 1) {
+                        if let Some(&next) = chars.peek() {
                             if next == '>' {
                                 self.arrow_amount += 1;
                             } else if self.stack >= 1 {
@@ -139,7 +144,7 @@ impl Iterator for TestFileIterator {
                             continue;
                         }
 
-                        if let Some(next) = line.chars().nth(index + 1) {
+                        if let Some(&next) = chars.peek() {
                             if next == 'n' {
                                 self.buffer.push('\n');
                                 ignore_next = true;
@@ -153,7 +158,7 @@ impl Iterator for TestFileIterator {
                         self.stack -= 1;
                         match self.stack.cmp(&0) {
                             std::cmp::Ordering::Less => {
-                                return Some(Err(format!("Bracket not matched at line {}. (Bracket closed without previously open)", index).into()));
+                                return Some(Err(format!("Bracket not matched at line {}. (Bracket closed without previously open)", line_count).into()));
                             }
                             std::cmp::Ordering::Equal => {
                                 let mut inner_buffer = self.buffer.clone();
@@ -247,7 +252,6 @@ impl Iterator for MergedTestFileTterator {
             (_, Err(err)) => {
                 return Some(Err(err));
             }
-            _ => return Some(Err("Ref test cannot be used in test file iterator.".into())),
         };
 
         Some(Ok(SimpleTest {
@@ -263,141 +267,3 @@ pub fn merge_test_file(
 ) -> Result<MergedTestFileTterator, Box<dyn Error>> {
     MergedTestFileTterator::new(input_test_file_iterator, output_test_file_iterator)
 }
-
-// pub fn read_test_file(test_file_path: &Path) -> Result<Vec<Test>, Box<dyn Error>> {
-//     let mut tests: Vec<Test> = Vec::new();
-//     let mut states: HashMap<&'static str, bool> = HashMap::from([
-//         ("standalone", false),
-//         ("trim", true),
-//         ("explicit-newline", false),
-//     ]);
-//
-//     let file = File::open(test_file_path)?;
-//     let reader = BufReader::new(file);
-//
-//     let mut stack: i32 = 0;
-//     let mut buffer = String::new();
-//     let mut test_buffer = SimpleTest::new();
-//     let mut arrow_amount: usize = 0;
-//
-//     for line in reader.lines() {
-//         let Ok(line) = line else {
-//             continue;
-//         };
-//
-//         // check if current line is a state modifier
-//         if line.trim().starts_with('#') {
-//             let full_state = &line[(line.find('#').unwrap_or_default() + 1)..];
-//             let (modifier_state, state) =
-//                 if let Some((modifier_state, state)) = full_state.split_once(':') {
-//                     (ModifierState::from_str(modifier_state), state.trim())
-//                 } else {
-//                     (ModifierState::Enable, full_state)
-//                 };
-//
-//             if let Some(state) = states.get_mut(state) {
-//                 match modifier_state {
-//                     ModifierState::Enable => {
-//                         *state = true;
-//                     }
-//                     ModifierState::Disable => {
-//                         *state = false;
-//                     }
-//                     _ => {}
-//                 }
-//             }
-//
-//             continue;
-//         }
-//
-//         let mut ignore_next = false;
-//         for (index, chr) in line.chars().enumerate() {
-//             if ignore_next {
-//                 ignore_next = false;
-//                 continue;
-//             }
-//
-//             match chr {
-//                 '{' => {
-//                     stack += 1;
-//                 }
-//
-//                 '-' => {
-//                     if let Some(next) = line.chars().nth(index + 1) {
-//                         if next == '>' {
-//                             arrow_amount += 1;
-//                         } else if stack >= 1 {
-//                             buffer.push('-');
-//                         }
-//                     }
-//                 }
-//
-//                 '\\' => {
-//                     if !states.get("explicit-newline").unwrap() {
-//                         if stack >= 1 {
-//                             buffer.push('\\');
-//                         }
-//                         continue;
-//                     }
-//
-//                     if let Some(next) = line.chars().nth(index + 1) {
-//                         if next == 'n' {
-//                             buffer.push('\n');
-//                             ignore_next = true;
-//                         } else if stack >= 1 {
-//                             buffer.push('\\');
-//                         }
-//                     }
-//                 }
-//
-//                 '}' => {
-//                     stack -= 1;
-//                     match stack.cmp(&0) {
-//                         std::cmp::Ordering::Less => {
-//                             return Err(format!("Bracket not mathed at line {}. (Bracket closed without previously open)", index).into());
-//                         }
-//                         std::cmp::Ordering::Equal => {
-//                             let mut inner_buffer = buffer.clone();
-//
-//                             if *states.get("trim").unwrap() {
-//                                 inner_buffer =
-//                                     inner_buffer.split('\n').map(|line| line.trim()).join("\n");
-//                             }
-//
-//                             if test_buffer.input.is_empty() {
-//                                 test_buffer.input = inner_buffer;
-//                                 if *states.get("standalone").unwrap() {
-//                                     tests.push(test_buffer.to_test());
-//                                     test_buffer = SimpleTest::new();
-//                                 }
-//                                 buffer.clear();
-//                                 arrow_amount = 0;
-//                             } else if test_buffer.expected_output.is_empty() && arrow_amount == 1 {
-//                                 test_buffer.expected_output = inner_buffer;
-//                                 tests.push(test_buffer.to_test());
-//                                 test_buffer = SimpleTest::new();
-//                                 buffer.clear();
-//                                 arrow_amount = 0;
-//                             } else if test_buffer.expected_output.is_empty() && arrow_amount != 1 {
-//                                 return Err("With the state \"standalone\" enable every input must once be piped to output using \"->\".".into());
-//                             }
-//                         }
-//                         _ => {}
-//                     }
-//                 }
-//
-//                 _ => {
-//                     if stack >= 1 {
-//                         buffer.push(chr);
-//                     }
-//                 }
-//             }
-//         }
-//
-//         if !states.get("explicit-newline").unwrap() {
-//             buffer.push('\n');
-//         }
-//     }
-//
-//     Ok(tests)
-// }

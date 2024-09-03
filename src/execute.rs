@@ -16,7 +16,7 @@ pub mod test {
         append_extension, excute_binary, limited_print, recompile_binary, sha256_digest,
         ExecutionInput,
     };
-    use crate::test_file::{merge_test_file, read_test_file, SimpleTest, TestFileIterator};
+    use crate::test_file::{merge_test_file, read_test_file, SimpleTest};
     use colored::Colorize;
     use crossterm::{
         event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent},
@@ -26,10 +26,10 @@ pub mod test {
         },
     };
     use data_encoding::HEXUPPER;
-    use itertools::{izip, Itertools};
+    use itertools::Itertools;
     use std::error::Error;
     use std::fs::File;
-    use std::io::{self, BufRead, BufReader, Write};
+    use std::io::{self, BufReader, Write};
     use std::path::{Path, PathBuf};
     use tui::style::Modifier;
     use tui::{
@@ -705,20 +705,19 @@ pub mod test {
         let mut tests_pass = true;
 
         let test_iterator: Box<dyn Iterator<Item = Result<SimpleTest, Box<dyn Error>>>> =
-            if expected_output_tests.is_some() {
-                Box::new(
-                    merge_test_file(input_tests, expected_output_tests.unwrap())
+            match expected_output_tests {
+                Some(expected_output_tests) => Box::new(
+                    merge_test_file(input_tests, expected_output_tests)
                         .expect("Failed to merged test file."),
-                )
-            } else {
-                Box::new(input_tests)
+                ),
+                None => Box::new(input_tests),
             };
 
         let mut only_run_at_ran: bool = false;
 
         #[allow(clippy::explicit_counter_loop)]
         for (inner_index, test) in test_iterator.enumerate() {
-            if !(only_run_at.is_some() && only_run_at.unwrap() == inner_index) {
+            if only_run_at.is_some() && only_run_at.unwrap() != inner_index {
                 continue;
             }
 
@@ -1024,7 +1023,7 @@ fn excute_binary(
     if let ExecutionInput::CustomInput(input) = input {
         let child_stdin = child.stdin.as_mut().unwrap();
         child_stdin.write_all(input.as_bytes())?;
-        drop(child_stdin);
+        let _ = child_stdin;
     }
 
     let output = child.wait_with_output()?;
@@ -1140,7 +1139,7 @@ fn limited_print(content: &str, cols: usize, rows: usize) {
         for col in row.chars().take(cols) {
             print!("{}", col);
         }
-        print!("\n");
+        println!();
     }
 
     io::stdout().flush().unwrap();

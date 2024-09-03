@@ -36,7 +36,6 @@ struct Cli {
 }
 
 fn main() {
-    // std::env::set_var("RUST_BACKTRACE", "full");
     let current_dir = std::env::current_dir().expect("Cannot find current directory.");
     initialize(current_dir).expect("Failed to initialize easy-runner.");
 
