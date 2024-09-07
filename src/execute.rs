@@ -1,5 +1,7 @@
 use crate::cache_file::{get_config, put_file, template_config_replacement};
 use crate::cache_file::{get_file, FileCache};
+
+use colored::Colorize;
 use data_encoding::HEXUPPER;
 use ring::digest;
 use std::ffi;
@@ -16,6 +18,7 @@ pub mod test {
         append_extension, excute_binary, limited_print, recompile_binary, sha256_digest,
         ExecutionInput,
     };
+    use crate::selector_evaluator::{evaluate, TestsRange};
     use crate::test_file::{merge_test_file, read_test_file, SimpleTest};
     use colored::Colorize;
     use crossterm::{
@@ -30,6 +33,7 @@ pub mod test {
     use std::error::Error;
     use std::fs::File;
     use std::io::{self, BufReader, Write};
+    use std::ops::{RangeBounds, RangeInclusive};
     use std::path::{Path, PathBuf};
     use tui::style::Modifier;
     use tui::{
@@ -43,7 +47,7 @@ pub mod test {
 
     use super::limited_string;
 
-    pub fn run_at(path: &Path, index: usize) -> io::Result<()> {
+    pub fn run_at(path: &Path, expression: &str) -> io::Result<()> {
         assert!(path.exists());
 
         let filename = path.file_name().unwrap().to_str().unwrap();
@@ -106,7 +110,7 @@ pub mod test {
             Ok(Some(file_cache)) if file_cache.source_hash == target_hashed => {
                 println!(
                     "{}",
-                    "ℹ️ Cache for {path:?} is matched, skip re-compiling..".bright_blue()
+                    format!("ℹ️ Cache for {path:?} is matched, skip re-compiling..").bright_blue()
                 );
                 file_cache
             }
@@ -145,66 +149,165 @@ pub mod test {
             return Ok(());
         }
 
-        if (file_cache.tests.len() < index) || (index == 0) {
-            println!(
-                "{} {}",
-                "❌ Test index is not valid. It must be in the range of 1 to.".bright_red(),
-                file_cache.tests.len()
-            );
-            return Ok(());
-        }
+        let range_tests = evaluate(expression)
+            .map_err(|err| io::Error::new(io::ErrorKind::Other, err.to_string()))?;
 
-        let run_result = match &file_cache.tests[index - 1] {
-            Test::StringTest {
-                input: _,
-                expected_output: _,
-            } => run_core(
-                &file_cache.tests[index - 1],
-                filename,
-                &config.binary_dir_path,
-            ),
-            Test::RefTest {
-                input,
-                expected_output,
-            } => _ref_test_run_core(
-                input,
-                expected_output.as_ref(),
-                filename,
-                &config.binary_dir_path,
-                Some(1),
-            ),
-        };
+        for range_test in range_tests {
+            let main_index = range_test.main_test;
 
-        match run_result {
-            Ok(RunResult::StringTest(success)) => {
-                if success {
-                    println!("* ✅ Test-{} completed.", index);
-                } else {
-                    println!("* ❌ Test-{} failed.", index);
-                }
-                success as usize
-            }
-
-            Ok(RunResult::RefTest {
-                status,
-                not_success,
-                total,
-            }) => {
+            if (file_cache.tests.len() < main_index) || (main_index == 0) {
                 println!(
-                    "\r{} Test [{}] ({} passed out of {}) ",
-                    if status { "✅" } else { "❌" },
-                    index,
-                    total - not_success,
-                    total,
+                    "{} {}",
+                    "❌ Test main index is not valid. It must be in the range of 1 to."
+                        .bright_red(),
+                    file_cache.tests.len()
                 );
-                status as usize
+                return Ok(());
             }
 
-            Err(error) => {
-                println!("{}", error);
-                0
-            }
-        };
+            match &file_cache.tests[main_index - 1] {
+                Test::StringTest {
+                    input: _,
+                    expected_output: _,
+                } => {
+                    if let Ok(RunResult::StringTest(success)) = run_core(
+                        &file_cache.tests[main_index - 1],
+                        filename,
+                        &config.binary_dir_path,
+                    ) {
+                        if success {
+                            println!("* ✅ Test-{} completed.", main_index);
+                        } else {
+                            println!("* ❌ Test-{} failed.", main_index);
+                        }
+                    }
+                }
+
+                Test::RefTest {
+                    input,
+                    expected_output,
+                } => match range_test.sub_tests {
+                    Some(sub_tests) => {
+                        let Ok(ref_test_result) = _ref_test_run_core(
+                            input,
+                            expected_output.as_ref(),
+                            filename,
+                            &config.binary_dir_path,
+                            Some(&sub_tests),
+                        ) else {
+                            println!(
+                                "\r* ❌ Some test in {}.{} - {}.{}  is cooked",
+                                main_index,
+                                sub_tests.start(),
+                                main_index,
+                                sub_tests.end()
+                            );
+                            break;
+                        };
+
+                        match ref_test_result {
+                            RunResult::RefTest {
+                                status: false,
+                                not_success: 0,
+                                total: 0,
+                            } => {
+                                println!(
+                                    "\r* ❌ Some test in {}.{} - {}.{}  isn't exists",
+                                    main_index,
+                                    sub_tests.start(),
+                                    main_index,
+                                    sub_tests.end()
+                                );
+                                break;
+                            }
+                            RunResult::RefTest {
+                                status,
+                                not_success: _,
+                                total: _,
+                            } => {
+                                if status {
+                                    println!(
+                                        "\r* ✅ Test {}.{} - {}.{} completed.",
+                                        main_index,
+                                        sub_tests.start(),
+                                        main_index,
+                                        sub_tests.end()
+                                    );
+                                } else {
+                                    println!(
+                                        "\r* ❌ Test {}.{} - {}.{} is failed.",
+                                        main_index,
+                                        sub_tests.start(),
+                                        main_index,
+                                        sub_tests.end()
+                                    );
+                                }
+                            }
+                            _ => unreachable!("tests in this loop will always be a ref test"),
+                        }
+                    }
+                    None => {
+                        // _ref_test_run_core(
+                        //     input,
+                        //     expected_output.as_ref(),
+                        //     filename,
+                        //     &config.binary_dir_path,
+                        //     None,
+                        // );
+                        if let Ok(RunResult::RefTest {
+                            status,
+                            not_success,
+                            total,
+                        }) = _ref_test_run_core(
+                            input,
+                            expected_output.as_ref(),
+                            filename,
+                            &config.binary_dir_path,
+                            None,
+                        ) {
+                            println!(
+                                "\r* {} Test [{}] ({} passed out of {}) ",
+                                if status { "✅" } else { "❌" },
+                                main_index,
+                                total - not_success,
+                                total,
+                            );
+                        }
+                    }
+                },
+            };
+
+            // match run_result {
+            //     Ok(RunResult::StringTest(success)) => {
+            //         if success {
+            //             println!("* ✅ Test-{} completed.", index);
+            //         } else {
+            //             println!("* ❌ Test-{} failed.", index);
+            //         }
+            //         success as usize
+            //     }
+            //
+            //     Ok(RunResult::RefTest {
+            //         status,
+            //         not_success,
+            //         total,
+            //     }) => {
+            //         println!(
+            //             "\r{} Test [{}] ({} passed out of {}) ",
+            //             if status { "✅" } else { "❌" },
+            //             index,
+            //             total - not_success,
+            //             total,
+            //         );
+            //         status as usize
+            //     }
+            //
+            //     Err(error) => {
+            //         println!("{}", error);
+            //         0
+            //     }
+            // };
+        }
 
         Ok(())
     }
@@ -660,7 +763,7 @@ pub mod test {
         expected_output: Option<&PathBuf>,
         guarantree_filename: &str,
         guarantree_binary_dir_path: &Path,
-        only_run_at: Option<usize>,
+        only_run_at: Option<&RangeInclusive<usize>>,
     ) -> io::Result<RunResult> {
         if !input.exists()
             || (expected_output.is_some() && !expected_output.as_ref().unwrap().exists())
@@ -717,8 +820,11 @@ pub mod test {
 
         #[allow(clippy::explicit_counter_loop)]
         for (inner_index, test) in test_iterator.enumerate() {
-            if only_run_at.is_some() && only_run_at.unwrap() != inner_index {
-                continue;
+            if let Some(run_at) = only_run_at {
+                if !run_at.contains(&(inner_index + 1)) {
+                    continue;
+                }
+                only_run_at_ran = true;
             }
 
             let Ok(SimpleTest {
@@ -726,7 +832,6 @@ pub mod test {
                 expected_output,
             }) = test
             else {
-                only_run_at_ran = true;
                 break;
             };
 
@@ -791,8 +896,8 @@ pub mod test {
         if only_run_at.is_some() && !only_run_at_ran {
             return Ok(RunResult::RefTest {
                 status: false,
-                not_success: total_inner_tests,
-                total: total_inner_tests,
+                not_success: 0,
+                total: 0,
             });
         }
 
@@ -880,7 +985,7 @@ pub mod test {
 
         println!(
             "{}",
-            "🚧 cache for {path:?} not found, start Re-compiling..".yellow()
+            format!("🚧 cache for {path:?} not found, start Re-compiling..").yellow()
         );
 
         let file = File::open(path)?;
@@ -925,7 +1030,7 @@ pub mod test {
 
         println!(
             "{}",
-            "🚧 cache for {path:?} not found, start Re-compiling..".yellow()
+            format!("🚧 cache for {path:?} not found, start Re-compiling..").yellow()
         );
 
         let file = File::open(path)?;
@@ -1098,7 +1203,10 @@ pub fn run(path: &Path) -> io::Result<()> {
 
     if let Ok(Some(file_cache)) = get_file(filename) {
         if target_hashed == file_cache.source_hash {
-            println!("ℹ️ cache for {path:?} is matched, skip re-compiling..");
+            println!(
+                "{}",
+                format!("ℹ️ cache for {path:?} is matched, skip re-compiling..").bright_blue()
+            );
 
             if excute_binary(
                 &config.binary_dir_path,
@@ -1113,7 +1221,7 @@ pub fn run(path: &Path) -> io::Result<()> {
         }
     }
 
-    println!("🚧 Re-compiling binary...");
+    println!("{}", "🚧 Re-compiling binary...".yellow());
 
     recompile_binary(path)?;
 

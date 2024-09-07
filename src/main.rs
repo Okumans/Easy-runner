@@ -8,7 +8,7 @@ enum CommandTest {
     Add { input: String, output: String },
     AddStandaloneLink { input: PathBuf, output: PathBuf },
     AddLink { tests: PathBuf },
-    RunAt { index: usize },
+    RunAt { expression: String },
     Config,
     Run,
     Show,
@@ -83,8 +83,9 @@ fn main() {
                         .expect("Failed to add Linked test.");
                 }
 
-                CommandTest::RunAt { index } => {
-                    execute::test::run_at(&path, index).expect("Failed to run test-at index.");
+                CommandTest::RunAt { expression } => {
+                    execute::test::run_at(&path, &expression)
+                        .expect("Failed to run test-at index.");
                 }
                 CommandTest::Run => {
                     execute::test::run(&path).expect("Failed to run executable.");
