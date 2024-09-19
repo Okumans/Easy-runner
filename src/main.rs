@@ -1,4 +1,4 @@
-use easy_runner::{cache_file::initialize, execute, test_file};
+use easy_runner::{cache_file::initialize, execute};
 
 use clap::{Parser, Subcommand};
 use std::{fs, path::PathBuf};
@@ -9,9 +9,7 @@ enum CommandTest {
     AddStandaloneLink { input: PathBuf, output: PathBuf },
     AddLink { tests: PathBuf },
     RunAt { expression: String },
-    Config,
     Run,
-    Show,
 }
 
 #[derive(Debug, Subcommand)]
@@ -89,21 +87,6 @@ fn main() {
                 }
                 CommandTest::Run => {
                     execute::test::run(&path).expect("Failed to run executable.");
-                }
-                CommandTest::Show => execute::test::show(&path).expect("Failed to show tests"),
-                CommandTest::Config => {
-                    let tests = test_file::read_test_file(&path);
-
-                    match tests {
-                        Ok(tests) => {
-                            for test in tests {
-                                println!("{}", test.expect("failed to unwrap test").to_test());
-                            }
-                        }
-                        Err(err) => {
-                            println!("failed to {}", err);
-                        }
-                    }
                 }
             }
         }
