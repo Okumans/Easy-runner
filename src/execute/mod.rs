@@ -1,24 +1,35 @@
-use crate::cache_file::{get_config, put_file, template_config_replacement};
+use crate::cache_file::{get_config, put_file, Files, DEFAULT_CACHE_FILE, DEFUALT_BIN_DIR};
 use crate::cache_file::{get_file, FileCache};
+use crate::log;
+use crate::utils::logging::*;
 use crate::utils::sha256_digest;
 
 use colored::Colorize;
 use data_encoding::HEXUPPER;
-use std::ffi;
+use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
-use std::process::{Command, Output, Stdio};
-use std::time::Instant;
+use thiserror::Error;
 
+pub mod core;
 pub mod test;
 
-enum ExecutionInput {
-    InheritFromTerminal,
-    CustomInput(String),
+use core::{execute_binary, recompile_binary, ExecutionInput, ExecutionStatus};
+
+#[derive(Debug, Error)]
+pub enum RunError {
+    #[error("I/O Error: {0}")]
+    Io(#[from] io::Error),
+
+    #[error("Compilation Error: {0}")]
+    CompilationError(String),
+
+    #[error("Other Error: {0}")]
+    Other(String),
 }
 
-pub fn run(path: &Path) -> io::Result<()> {
+pub fn run(path: &Path) -> Result<(), RunError> {
     assert!(path.exists());
 
     let filename = path.file_name().unwrap().to_str().unwrap();
@@ -27,20 +38,21 @@ pub fn run(path: &Path) -> io::Result<()> {
     let target_reader = io::BufReader::new(target_file);
     let target_hashed = HEXUPPER.encode(sha256_digest(target_reader)?.as_ref());
 
-    let config = get_config()?;
+    let config = get_config()?; // Assume get_config returns io::Result
 
-    let file_cache = match get_file(filename) {
+    match get_file(filename) {
         Ok(Some(file_cache)) if file_cache.source_hash == target_hashed => {
-            println!(
-                "{}",
-                format!("ℹ️ Cache for {path:?} is matched, skip re-compiling..").bright_blue()
-            );
-            file_cache
+            log!(info, "Cache hit for {path:?}. Skipping recompilation.");
         }
         Ok(Some(file_cache)) => {
-            println!("{}", "🚧 Re-compiling binary...".yellow());
+            log!(warn, "Source file {path:?} has changed. Recompiling...");
 
-            recompile_binary(path)?;
+            recompile_binary(path).map_err(RunError::CompilationError)?;
+
+            log!(
+                success,
+                "Recompilation succeeded. Binary for {path:?} is ready."
+            );
 
             let file_cache = FileCache {
                 source_hash: target_hashed,
@@ -48,13 +60,16 @@ pub fn run(path: &Path) -> io::Result<()> {
             };
 
             put_file(filename, file_cache.clone())?;
-
-            file_cache
         }
         _ => {
-            println!("{}", "🚧 Re-compiling binary...".yellow());
+            log!(warn, "No cache entry found for {path:?}. Recompiling...");
 
-            recompile_binary(path)?;
+            recompile_binary(path).map_err(RunError::CompilationError)?;
+
+            log!(
+                success,
+                "Compilation succeeded. Binary for {path:?} is ready."
+            );
 
             let file_cache = FileCache {
                 source_hash: target_hashed,
@@ -62,131 +77,131 @@ pub fn run(path: &Path) -> io::Result<()> {
             };
 
             put_file(filename, file_cache.clone())?;
-
-            file_cache
         }
-    };
+    }
 
-    put_file(filename, file_cache)?;
-    let _ = excute_binary(
-        &config.binary_dir_path,
-        filename,
-        ExecutionInput::InheritFromTerminal,
-        false,
-    )?;
+    loop {
+        match execute_binary(
+            &config.binary_dir_path,
+            filename,
+            ExecutionInput::InheritFromTerminal,
+        )? {
+            ExecutionStatus::Successful {
+                output: _,
+                time_elapsed,
+            } => {
+                log!(
+                    success,
+                    "Execution of {path:?} completed successfully in {time_elapsed:?}."
+                );
+                return Ok(());
+            }
+            ExecutionStatus::Failed(err) => {
+                log!(error, "Execution of {path:?} failed due to error: {err}.");
+                return Ok(());
+            }
+            ExecutionStatus::NeedRecompilation => {
+                log!(warn, "Execution failed, recompilation needed for {path:?}.");
+
+                recompile_binary(path).map_err(RunError::CompilationError)?;
+
+                log!(
+                    success,
+                    "Recompilation succeeded for {path:?}. Retrying execution..."
+                );
+            }
+        }
+    }
+}
+
+pub fn check_initialized(current_path: &Path) -> bool {
+    current_path.join(DEFAULT_CACHE_FILE).is_file()
+}
+
+pub fn initialize(current_path: &Path) -> io::Result<()> {
+    if !check_initialized(current_path) {
+        log!(info, "Initializing Easy Runner...");
+
+        let mut binary_dir_path = current_path.to_path_buf();
+
+        if !Path::new(DEFUALT_BIN_DIR).is_dir() {
+            log!(
+                question,
+                "Specify the location for the compiled binary (Press Enter for default location): "
+            );
+            io::stdout().flush().unwrap();
+
+            let mut location = String::new();
+            io::stdin().read_line(&mut location)?;
+
+            let trimmed = location.trim();
+            binary_dir_path = if trimmed.is_empty() {
+                binary_dir_path.join(DEFUALT_BIN_DIR)
+            } else {
+                binary_dir_path.join(trimmed)
+            };
+
+            if !binary_dir_path.is_dir() {
+                fs::create_dir(&binary_dir_path)?;
+                log!(
+                    success,
+                    "Created directory for binaries at: {binary_dir_path:?}"
+                );
+            }
+        } else {
+            binary_dir_path = binary_dir_path.join(DEFUALT_BIN_DIR);
+            log!(
+                info,
+                "Using existing binary directory at: {binary_dir_path:?}"
+            );
+        }
+
+        let languages_config: HashMap<String, String> = HashMap::from([
+            (
+                "cpp".to_string(),
+                "g++ $(FILE) -o $(BIN_DIR)/$(FILENAME).$(EXE_EXT) --std=c++20".to_string(),
+            ),
+            (
+                "c".to_string(),
+                "gcc $(FILE) -o $(BIN_DIR)/$(FILENAME).$(EXE_EXT)".to_string(),
+            ),
+        ]);
+
+        let files = Files {
+            binary_dir_path: binary_dir_path.clone(),
+            files: HashMap::new(),
+            languages_config,
+        };
+
+        let file = fs::File::create(current_path.join(DEFAULT_CACHE_FILE))?;
+        let mut writer = io::BufWriter::new(file);
+
+        serde_json::to_writer_pretty(&mut writer, &files)?;
+        writer.flush()?;
+
+        log!(
+            success,
+            "Easy Runner has been successfully initialized with configuration."
+        );
+    } else {
+        log!(info, "Easy Runner is already initialized.");
+    }
 
     Ok(())
 }
 
-fn excute_binary(
-    binary_dir_path: &Path,
-    filename: &str,
-    input: ExecutionInput,
-    quiet: bool,
-) -> io::Result<Option<Output>> {
-    let binary_name = if cfg!(windows) {
-        format!("{filename}.exe")
-    } else {
-        format!("{filename}.out")
-    };
+pub fn status() -> io::Result<()> {
+    let config = get_config()?;
 
-    if !binary_dir_path.join(&binary_name).exists() {
-        println!("🚧 Re-compilation needed, run \"{filename}\" again.");
-        if let Ok(Some(file_cache)) = get_file(filename) {
-            let file_cache = FileCache {
-                source_hash: "PENDING_RECOMPILATION".to_string(),
-                ..file_cache
-            };
-            put_file(filename, file_cache)?;
-        } else {
-            put_file(
-                filename,
-                FileCache {
-                    source_hash: "PENDING_RECOMPILATION".to_string(),
-                    tests: Vec::new(),
-                },
-            )?;
-        }
-        return Ok(None);
+    let tracked_numbers = config.files.len();
+    if tracked_numbers == 0 {
+        log!(info, "Tracked nothing..");
+        return Ok(());
     }
 
-    if !quiet {
-        println!();
-    }
-
-    let now = Instant::now();
-
-    let mut child = Command::new(binary_dir_path.join(&binary_name))
-        .stdin(match input {
-            ExecutionInput::InheritFromTerminal => Stdio::inherit(),
-            ExecutionInput::CustomInput(_) => Stdio::piped(),
-        })
-        .stdout(match input {
-            ExecutionInput::InheritFromTerminal => Stdio::inherit(),
-            ExecutionInput::CustomInput(_) => Stdio::piped(),
-        })
-        .spawn()?;
-
-    if let ExecutionInput::CustomInput(input) = input {
-        let child_stdin = child.stdin.as_mut().unwrap();
-        child_stdin.write_all(input.as_bytes())?;
-        let _ = child_stdin;
-    }
-
-    let output = child.wait_with_output()?;
-
-    let elapsed = now.elapsed();
-
-    if !quiet {
-        println!();
-    } else {
-        return Ok(Some(output));
-    }
-
-    if output.status.success() {
-        println!("✅ Execution of \"{binary_name}\" succeeded, taking {elapsed:?}");
-    } else {
-        println!("❌ Execution of \"{binary_name}\" failed");
-    }
-
-    Ok(Some(output))
-}
-
-fn recompile_binary(path: &Path) -> io::Result<()> {
-    let file_type = path.extension().and_then(ffi::OsStr::to_str).unwrap();
-
-    let mut config = get_config()?;
-
-    if !config.languages_config.contains_key(file_type) {
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            "❌ File type \"{file_type}\" is not supported.",
-        ));
-    }
-
-    let mut sys_call = config.languages_config.remove(file_type).unwrap();
-    if let Err(err) =
-        template_config_replacement(&mut sys_call, config.binary_dir_path.as_path(), path)
-    {
-        return Err(io::Error::new(io::ErrorKind::Other, err));
-    }
-
-    let sys_call: Vec<&str> = sys_call.split_whitespace().collect();
-    assert_ne!(sys_call.len(), 0);
-
-    let command = sys_call[0];
-    let args = &sys_call[1..];
-
-    let output = Command::new(command)
-        .args(args)
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .output()?;
-
-    if output.status.success() {
-        println!("✅ Compilation succeeded");
-    } else {
-        println!("❌ Compilation failed");
+    log!(info, "Tracked {} files.", tracked_numbers);
+    for (index, (filename, file_cache)) in config.files.iter().enumerate() {
+        println!("{}. {filename}\t{}", index + 1, file_cache.source_hash);
     }
 
     Ok(())

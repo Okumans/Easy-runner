@@ -19,27 +19,11 @@ const TEMPLATE_CONFIG_DIRNAME: &str = "$(DIR)";
 const TEMPLATE_CONFIG_DIR: &str = "$(DIRNAME)";
 const TEMPLATE_CONFIG_EXE_EXTENSION: &str = "$(EXE_EXT)";
 
-const README_CONTENT: &str = r#"
-# Compiled Binary File Instructions
-
-Compiled binary file needs to be named `$(FILENAME).$(EXE_EXT)` and placed in the `$(BIN_DIR)` directory.
-
-## Available Macros
-
-- `$(FILE)`: file path
-- `$(FILENAME)`: filename with extension
-- `$(DIR)`: file directory path
-- `$(DIRNAME)`: file directory name
-- `$(BIN_DIR)`: binary directory path
-- `$(EXE_EXT)`: binary extension based on OS
-"#;
-
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Files {
     pub binary_dir_path: PathBuf,
     pub files: HashMap<String, FileCache>,
     pub languages_config: HashMap<String, String>,
-    pub no_readme: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -139,83 +123,6 @@ pub fn template_config_replacement(
         TEMPLATE_CONFIG_EXE_EXTENSION,
         if cfg!(windows) { "exe" } else { "out" },
     );
-
-    Ok(())
-}
-
-pub fn initialize(current_path: PathBuf) -> io::Result<()> {
-    if !current_path.join(DEFAULT_CACHE_FILE).is_file() {
-        println!("❌ Cannot locate {DEFAULT_CACHE_FILE}, creating..");
-
-        let mut binary_dir_path = current_path.clone();
-        let mut no_readme = false;
-
-        if !Path::new(DEFUALT_BIN_DIR).is_dir() {
-            print!("❓ Where would you like the compiled binary to be located? (Leave blank for default location): ");
-            io::stdout().flush().unwrap();
-
-            let mut location = String::new();
-            io::stdin().read_line(&mut location)?;
-
-            let trimmed = location.trim();
-            binary_dir_path = if trimmed.is_empty() {
-                binary_dir_path.join(DEFUALT_BIN_DIR)
-            } else {
-                binary_dir_path.join(trimmed)
-            };
-
-            dbg!(&binary_dir_path);
-
-            if !binary_dir_path.is_dir() {
-                fs::create_dir(&binary_dir_path)?;
-            }
-        }
-
-        if !current_path.join("README.md").exists() {
-            print!("❓ README.md not found, Would you like to create one? [y/n]? (\"NE\" to no show this again.) ");
-            io::stdout().flush()?;
-
-            let mut input = String::new();
-            io::stdin()
-                .read_line(&mut input)
-                .expect("Failed to read line.");
-
-            no_readme = match input.trim() {
-                "y" | "Y" => {
-                    let mut read_me_file = fs::File::create(current_path.join("README.md"))?;
-                    read_me_file.write_all(README_CONTENT.as_bytes())?;
-                    println!("✅ README.md created successfuly.");
-                    false
-                }
-                "NE" => true,
-                _ => false,
-            };
-        }
-
-        let languages_config: HashMap<String, String> = HashMap::from([
-            (
-                "cpp".to_string(),
-                "g++ $(FILE) -o $(BIN_DIR)/$(FILENAME).$(EXE_EXT) --std=c++20".to_string(),
-            ),
-            (
-                "c".to_string(),
-                "gcc $(FILE) -o $(BIN_DIR)/$(FILENAME).$(EXE_EXT)".to_string(),
-            ),
-        ]);
-
-        let files: Files = Files {
-            binary_dir_path: binary_dir_path.clone(),
-            files: HashMap::new(),
-            languages_config,
-            no_readme,
-        };
-
-        let file = fs::File::create(current_path.join(DEFAULT_CACHE_FILE))?;
-        let mut writer = io::BufWriter::new(file);
-
-        serde_json::to_writer_pretty(&mut writer, &files)?;
-        writer.flush()?;
-    }
 
     Ok(())
 }

@@ -3,6 +3,33 @@ use std::io::Read;
 use std::io::{self, Write};
 use std::path::PathBuf;
 
+// Define the macro in a module
+pub mod logging {
+    use colored::Colorize;
+
+    #[macro_export]
+    macro_rules! log {
+        (info, $($arg:tt)*) => {
+            println!("{}: {}", "[Info]".blue().bold(), format!($($arg)*).bright_blue());
+        };
+        (warn, $($arg:tt)*) => {
+            println!("🚧: {}", format!($($arg)*).yellow());
+        };
+        (error, $($arg:tt)*) => {
+            println!("❌: {}", format!($($arg)*).red());
+        };
+        (question, $($arg:tt)*) => {
+            print!("❓: {}", format!($($arg)*).bright_blue());
+        };
+        (success, $($arg:tt)*) => {
+            println!("✅: {}", format!($($arg)*).green());
+        };
+        ($($arg:tt)*) => {
+            println!("{}: {}", "[Info]".bold().blue(), format!($($arg)*).blue());
+        };
+    }
+}
+
 pub fn sha256_digest<R: Read>(mut reader: R) -> io::Result<digest::Digest> {
     let mut context = digest::Context::new(&digest::SHA256);
     let mut buffer = [0; 1024];
@@ -30,18 +57,51 @@ pub fn limited_print(content: &str, cols: usize, rows: usize) {
     io::stdout().flush().expect("Unable to flush stdout.");
 }
 
-pub fn limited_string(content: &str, cols: usize, rows: usize) -> String {
-    assert_ne!(rows, 0);
+pub fn limited_string(content: &str, cols: usize, rows: usize, truncated: bool) -> String {
+    let mut limited_content = String::new();
+    let mut current_rows = 0;
 
-    let mut buffer = String::new();
-    for row in content.lines().take(rows) {
-        for col in row.chars().take(cols) {
-            buffer.push(col);
+    if truncated {
+        let mut current_row_len = 0;
+
+        for ch in content.chars() {
+            if current_row_len >= cols {
+                limited_content.push('\n');
+                current_row_len = 0;
+                current_rows += 1;
+
+                if current_rows >= rows {
+                    limited_content.push_str("...");
+                    break;
+                }
+            }
+
+            limited_content.push(ch);
+            current_row_len += 1;
         }
-        buffer.push('\n');
-    }
 
-    buffer
+        limited_content
+    } else {
+        #[allow(clippy::explicit_counter_loop)]
+        for line in content.lines() {
+            if current_rows >= rows {
+                limited_content.push_str("...");
+                break;
+            }
+
+            let limited_line = if line.chars().count() > cols {
+                line.chars().take(cols - 3).collect::<String>() + "..."
+            } else {
+                line.to_string()
+            };
+
+            limited_content.push_str(&limited_line);
+            limited_content.push('\n');
+            current_rows += 1;
+        }
+
+        limited_content.trim_end().to_string()
+    }
 }
 
 pub fn append_extension(extension: &str, path: PathBuf) -> PathBuf {

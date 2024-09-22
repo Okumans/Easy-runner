@@ -10,6 +10,6 @@ serde = { version = "^1.0", features = ["derive"] }
 ring = "*"
 data-encoding = "*"
 crossterm = "*"
-tui = "0.19"
 itertools = "*"
-colored = "*"
+colored = "2.0"
+thiserror = "1.0"
