@@ -90,6 +90,7 @@ pub fn run_at(src_path: &Path, expression: &str) -> Result<(), RunError> {
             return Ok(());
         }
 
+        // TODO: Show input, output and expected_output when testcase failed.
         match &file_cache.tests[main_index - 1] {
             Test::StringTest {
                 input: _,
@@ -106,17 +107,19 @@ pub fn run_at(src_path: &Path, expression: &str) -> Result<(), RunError> {
                 ) {
                     if status {
                         println!(
-                            "* ✅ {} {} in {:?}.",
-                            format!("Test #{}", main_index).blue(),
+                            "* ✅ {}{} {} in {}.",
+                            "Test #".purple(),
+                            main_index.to_string().yellow(),
                             "completed successfully".green(),
-                            time_elapsed
+                            format!("{:?}", time_elapsed).green().italic()
                         );
                     } else {
                         println!(
-                            "* ❌ {} {} in {:?}.",
-                            format!("Test #{}", main_index).blue(),
+                            "* ❌ {}{} {} in {}.",
+                            "Test #".purple(),
+                            main_index.to_string().yellow(),
                             "failed after".red(),
-                            time_elapsed
+                            format!("{:?}", time_elapsed).green().italic()
                         );
                     }
                 }
@@ -162,8 +165,8 @@ pub fn run_at(src_path: &Path, expression: &str) -> Result<(), RunError> {
                         }
                         RunResult::RefTest {
                             status,
-                            total_test: _,
-                            passed_test: _,
+                            total_test,
+                            passed_test,
                             detailed_status,
                         } => {
                             print_ref_testcases_detailed(
@@ -172,35 +175,55 @@ pub fn run_at(src_path: &Path, expression: &str) -> Result<(), RunError> {
                                 detailed_status.as_slice(),
                             )?;
 
-                            if status {
-                                println!(
-                                    "\r* ✅ Test {}.{} - {}.{} completed.",
-                                    main_index,
-                                    sub_tests.start(),
-                                    main_index,
-                                    sub_tests.end()
-                                );
-                            } else {
-                                println!(
-                                    "\r* ❌ Test {}.{} - {}.{} is failed.",
-                                    main_index,
-                                    sub_tests.start(),
-                                    main_index,
-                                    sub_tests.end()
-                                );
-                            }
+                            // printing fancy test.
+                            println!(
+                                "\r* {} [{}]{} {}{} {} in average of {}",
+                                if status { "✅" } else { "❌" },
+                                (passed_test as f32 / total_test as f32 * 100.0)
+                                    .to_string()
+                                    .yellow(),
+                                _ref_testcases_minimized(detailed_status.as_slice()),
+                                "Test #".purple(),
+                                if sub_tests.start() == sub_tests.end() {
+                                    format!(
+                                        "{}.{}",
+                                        main_index.to_string().yellow(),
+                                        sub_tests.start().to_string().yellow()
+                                    )
+                                } else {
+                                    format!(
+                                        "{}.{} - {}{}.{}",
+                                        main_index.to_string().yellow(),
+                                        sub_tests.start().to_string().yellow(),
+                                        "#".purple(),
+                                        main_index.to_string().yellow(),
+                                        sub_tests.end().to_string().yellow(),
+                                    )
+                                },
+                                if status {
+                                    "completed successfully".green()
+                                } else {
+                                    "failed".red()
+                                },
+                                format!(
+                                    "{:?}",
+                                    Duration::from_millis(
+                                        (detailed_status
+                                            .iter()
+                                            .map(|elm| elm.time_elapsed.as_millis())
+                                            .sum::<u128>()
+                                            / detailed_status.len() as u128)
+                                            as u64
+                                    )
+                                )
+                                .green()
+                                .italic()
+                            );
                         }
                         _ => unreachable!("tests in this loop will always be a ref test"),
                     }
                 }
                 None => {
-                    // _ref_test_run_core(
-                    //     input,
-                    //     expected_output.as_ref(),
-                    //     filename,
-                    //     &config.binary_dir_path,
-                    //     None,
-                    // );
                     if let Ok(RunResult::RefTest {
                         status,
                         total_test,
@@ -219,11 +242,32 @@ pub fn run_at(src_path: &Path, expression: &str) -> Result<(), RunError> {
                             detailed_status.as_slice(),
                         )?;
                         println!(
-                            "\r* {} Test [{}] ({} passed out of {}) ",
+                            "\r* {} [{}]{} {}{} {} in average of {}",
                             if status { "✅" } else { "❌" },
-                            main_index,
-                            passed_test,
-                            total_test,
+                            (passed_test as f32 / total_test as f32 * 100.0)
+                                .to_string()
+                                .yellow(),
+                            _ref_testcases_minimized(detailed_status.as_slice()),
+                            "Test #".purple(),
+                            main_index.to_string().yellow(),
+                            if status {
+                                "completed successfully".green()
+                            } else {
+                                "failed".red()
+                            },
+                            format!(
+                                "{:?}",
+                                Duration::from_millis(
+                                    (detailed_status
+                                        .iter()
+                                        .map(|elm| elm.time_elapsed.as_millis())
+                                        .sum::<u128>()
+                                        / detailed_status.len() as u128)
+                                        as u64
+                                )
+                            )
+                            .green()
+                            .italic()
                         );
                     }
                 }
@@ -274,34 +318,45 @@ pub fn print_ref_testcases_detailed(
                 continue;
             };
 
-            println!(
-                "[{}] SubTest #{}. Taking: {:?}\n{}\n{}\n{}\n{}\n{}\n{}\n",
-                if detailed_status.status {
-                    "P".green()
-                } else {
-                    "-".red()
-                },
-                index,
-                detailed_status.time_elapsed,
-                "Input:".bold(),
-                padded_string(&input, cols, rows, input.lines().count() == 1).blue(),
-                "Output:".bold(),
-                padded_string(
-                    &detailed_status.output,
-                    cols,
-                    rows,
-                    detailed_status.output.lines().count() == 1
-                )
-                .red(),
-                "Expected-output:".bold(),
-                padded_string(
-                    &expected_output,
-                    cols,
-                    rows,
-                    expected_output.lines().count() == 1
-                )
-                .green(),
-            );
+            if detailed_status.status {
+                println!(
+                    "[{}] {}{}. Taking: {}",
+                    "P".green(),
+                    "SubTest #".purple().bold(),
+                    (index + 1).to_string().yellow(),
+                    format!("{:?}", detailed_status.time_elapsed)
+                        .green()
+                        .italic(),
+                );
+            } else {
+                println!(
+                    "[{}] {}{}. Taking: {}\n{}\n{}\n{}\n{}\n{}\n{}",
+                    "-".red(),
+                    "SubTest #".purple().bold(),
+                    index.to_string().yellow(),
+                    format!("{:?}", detailed_status.time_elapsed)
+                        .green()
+                        .italic(),
+                    "Input:".bold(),
+                    padded_string(&input, cols, rows, input.lines().count() == 1).blue(),
+                    "Output:".bold(),
+                    padded_string(
+                        &detailed_status.output,
+                        cols,
+                        rows,
+                        detailed_status.output.lines().count() == 1
+                    )
+                    .red(),
+                    "Expected-output:".bold(),
+                    padded_string(
+                        &expected_output,
+                        cols,
+                        rows,
+                        expected_output.lines().count() == 1
+                    )
+                    .green(),
+                );
+            }
 
             println!("{}", "-".repeat(cols));
         } else {
@@ -317,7 +372,22 @@ pub fn print_ref_testcases_detailed(
     Ok(())
 }
 
-pub fn print_ref_testcases_minimized() {}
+pub fn _ref_testcases_minimized(detailed_statuses: &[DetailedStatus]) -> String {
+    let mut average_time: Duration = Duration::from_secs(0);
+    let mut result = String::new();
+
+    result.push('[');
+    for detailed_status in detailed_statuses {
+        match detailed_status.status {
+            true => result.push_str(&format!("{}", "P".green())),
+            false => result.push_str(&format!("{}", "-".red())),
+        };
+        average_time += detailed_status.time_elapsed;
+    }
+    result.push(']');
+
+    result
+}
 
 pub fn run(src_path: &Path) -> Result<(), RunError> {
     assert!(src_path.exists());
@@ -331,67 +401,19 @@ pub fn run(src_path: &Path) -> Result<(), RunError> {
     let config = get_config()?;
 
     if !config.binary_dir_path.is_dir() {
-        let env_path = std::env::current_dir().expect("Cannot find current directory.");
-        let mut binary_dir_path = env_path.join(DEFUALT_BIN_DIR);
-
-        println!(
-            "{}",
-            "❌ Configured compiled Binary directory path not found.".bright_red()
-        );
-
-        if !env_path.join(DEFUALT_BIN_DIR).is_dir() {
-            print!("❓ Where would you like the compiled binary to be located? (Leave blank for default location): ");
-            io::stdout().flush().unwrap();
-
-            let mut location = String::new();
-
-            io::stdin().read_line(&mut location)?;
-
-            let trimmed = location.trim();
-            binary_dir_path = if trimmed.is_empty() {
-                binary_dir_path.join(DEFUALT_BIN_DIR)
-            } else {
-                binary_dir_path.join(trimmed)
-            };
-        } else {
-            println!(
-                "{}",
-                "ℹ️ Located default compiled binary directory.".bright_blue()
-            );
-        }
-
-        let files: Files = Files {
-            binary_dir_path,
-            ..config
-        };
-
-        let file = File::create(env_path.join(DEFAULT_CACHE_FILE))?;
-        let mut writer = io::BufWriter::new(file);
-
-        serde_json::to_writer_pretty(&mut writer, &files).map_err(|err| {
-            io::Error::new(
-                io::ErrorKind::Other,
-                format!("Failed to write data to json : {}", err),
-            )
-        })?;
-        writer.flush()?;
-
-        println!(
-            "{}",
-            "✅ Successfuly updated compiled binary directory path.".green()
-        )
+        return Err(RunError::Other("Binary path not found.".to_string()));
     }
 
     let file_cache = match get_file(filename) {
         Ok(Some(file_cache)) if file_cache.source_hash == target_hashed => {
-            println!(
-                "{}",
-                format!("ℹ️ Cache for {src_path:?} is matched, skip re-compiling..").bright_blue()
+            log!(
+                info,
+                "Cache for {src_path:?} is matched, skip re-compiling.."
             );
             file_cache
         }
         Ok(Some(file_cache)) => {
-            println!("{}", "🚧 Re-compiling binary...".yellow());
+            log!(warn, "🚧 Re-compiling binary...");
 
             recompile_binary(src_path).map_err(RunError::CompilationError)?;
 
@@ -405,7 +427,7 @@ pub fn run(src_path: &Path) -> Result<(), RunError> {
             file_cache
         }
         _ => {
-            println!("{}", "🚧 Re-compiling binary...".yellow());
+            log!(warn, "🚧 Re-compiling binary...");
 
             recompile_binary(src_path).map_err(RunError::CompilationError)?;
 
@@ -423,7 +445,7 @@ pub fn run(src_path: &Path) -> Result<(), RunError> {
     let mut score: usize = 0;
 
     if file_cache.tests.is_empty() {
-        println!("{}", "ℹ️ No test found.".bright_blue());
+        log!(info, "No test found.");
         return Ok(());
     }
 
