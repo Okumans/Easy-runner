@@ -8,6 +8,7 @@ use crate::selector_evaluator::evaluate;
 use crate::test_file::{merge_test_file, read_test_file, SimpleTest};
 use crate::utils::{append_extension, limited_string, sha256_digest};
 use colored::Colorize;
+use core::panic;
 use crossterm::terminal;
 use data_encoding::HEXUPPER;
 use std::error::Error;
@@ -413,7 +414,7 @@ pub fn run(src_path: &Path) -> Result<(), RunError> {
             file_cache
         }
         Ok(Some(file_cache)) => {
-            log!(warn, "🚧 Re-compiling binary...");
+            log!(warn, "Re-compiling binary...");
 
             recompile_binary(src_path).map_err(RunError::CompilationError)?;
 
@@ -427,7 +428,7 @@ pub fn run(src_path: &Path) -> Result<(), RunError> {
             file_cache
         }
         _ => {
-            log!(warn, "🚧 Re-compiling binary...");
+            log!(warn, "Re-compiling binary...");
 
             recompile_binary(src_path).map_err(RunError::CompilationError)?;
 
@@ -455,12 +456,24 @@ pub fn run(src_path: &Path) -> Result<(), RunError> {
                 status,
                 time_elapsed,
             }) => {
-                println!(
-                    "{} Test [{}/{}]",
-                    if status { "✅" } else { "❌" },
-                    index + 1,
-                    file_cache.tests.len()
-                );
+                if status {
+                    println!(
+                        "* ✅ {}{} {} in {}.",
+                        "Test #".purple(),
+                        index.to_string().yellow(),
+                        "completed successfully".green(),
+                        format!("{:?}", time_elapsed).green().italic()
+                    );
+                } else {
+                    println!(
+                        "* ❌ {}{} {} in {}.",
+                        "Test #".purple(),
+                        index.to_string().yellow(),
+                        "failed after".red(),
+                        format!("{:?}", time_elapsed).green().italic()
+                    );
+                }
+
                 status as usize
             }
 
@@ -468,15 +481,47 @@ pub fn run(src_path: &Path) -> Result<(), RunError> {
                 status,
                 total_test,
                 passed_test,
-                detailed_status: _,
+                detailed_status,
             }) => {
+                let (input, expected_output) = match test {
+                    Test::RefTest {
+                        input,
+                        expected_output,
+                    } => (input, expected_output),
+                    _ => unreachable!("Because it's a case of ouput of ref-test."),
+                };
+
+                print_ref_testcases_detailed(
+                    _test_iterator(input, expected_output.as_ref()).map_err(RunError::Other)?,
+                    detailed_status.as_slice(),
+                )?;
+
+                // printing fancy test.
                 println!(
-                    "\r{} Test [{}/{}] ({} passed out of {}) ",
+                    "\r* {} [{}]{} {} {} in average of {}",
                     if status { "✅" } else { "❌" },
-                    index + 1,
-                    file_cache.tests.len(),
-                    passed_test,
-                    total_test,
+                    (passed_test as f32 / total_test as f32 * 100.0)
+                        .to_string()
+                        .yellow(),
+                    _ref_testcases_minimized(detailed_status.as_slice()),
+                    "Test #".purple(),
+                    if status {
+                        "completed successfully".green()
+                    } else {
+                        "failed".red()
+                    },
+                    format!(
+                        "{:?}",
+                        Duration::from_millis(
+                            (detailed_status
+                                .iter()
+                                .map(|elm| elm.time_elapsed.as_millis())
+                                .sum::<u128>()
+                                / detailed_status.len() as u128) as u64
+                        )
+                    )
+                    .green()
+                    .italic()
                 );
                 status as usize
             }
