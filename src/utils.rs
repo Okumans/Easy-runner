@@ -45,17 +45,17 @@ pub fn sha256_digest<R: Read>(mut reader: R) -> io::Result<digest::Digest> {
     Ok(context.finish())
 }
 
-pub fn limited_print(content: &str, cols: usize, rows: usize) {
-    assert_ne!(rows, 0);
-    for row in content.lines().take(rows) {
-        for col in row.chars().take(cols) {
-            print!("{}", col);
-        }
-        println!();
-    }
-
-    io::stdout().flush().expect("Unable to flush stdout.");
-}
+// pub fn limited_print(content: &str, cols: usize, rows: usize) {
+//     assert_ne!(rows, 0);
+//     for row in content.lines().take(rows) {
+//         for col in row.chars().take(cols) {
+//             print!("{}", col);
+//         }
+//         println!();
+//     }
+//
+//     io::stdout().flush().expect("Unable to flush stdout.");
+// }
 
 pub fn limited_string(content: &str, cols: usize, rows: usize, truncated: bool) -> String {
     let mut limited_content = String::new();

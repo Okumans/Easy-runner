@@ -407,10 +407,7 @@ pub fn run(src_path: &Path) -> Result<(), RunError> {
 
     let file_cache = match get_file(filename) {
         Ok(Some(file_cache)) if file_cache.source_hash == target_hashed => {
-            log!(
-                info,
-                "Cache for {src_path:?} is matched, skip re-compiling.."
-            );
+            log!(info, "Cache hit for {src_path:?}. Skipping recompilation.");
             file_cache
         }
         Ok(Some(file_cache)) => {
@@ -564,15 +561,12 @@ pub fn add(path: &Path, input: &str, expected_output: &str) -> Result<(), io::Er
         });
 
         put_file(filename, file_cache)?;
-        println!("{}", "✅ Successfuly add test.".green());
+        log!(success, "Successfuly add test.");
 
         return Ok(());
     }
 
-    println!(
-        "{}",
-        "🚧 cache for {path:?} not found, start Re-compiling..".yellow()
-    );
+    log!(warn, "Cache for {path:?} not found, start Re-compiling..");
 
     let file = File::open(path)?;
     let reader = io::BufReader::new(file);
@@ -589,7 +583,7 @@ pub fn add(path: &Path, input: &str, expected_output: &str) -> Result<(), io::Er
         },
     )?;
 
-    println!("{}", "✅ Successfuly add test.".green());
+    log!(success, "Successfuly add test.");
 
     Ok(())
 }
@@ -822,15 +816,12 @@ pub fn add_file_link(path: &Path, file_tests: &Path) -> io::Result<()> {
         });
 
         put_file(filename, file_cache)?;
-        println!("{}", "✅ Successfuly add test.".green());
+        log!(success, "Successfuly add test.");
 
         return Ok(());
     }
 
-    println!(
-        "{}",
-        format!("🚧 cache for {path:?} not found, start Re-compiling..").yellow()
-    );
+    log!(warn, "Cache for {path:?} not found, start Re-compiling..");
 
     let file = File::open(path)?;
     let reader = io::BufReader::new(file);
@@ -847,7 +838,7 @@ pub fn add_file_link(path: &Path, file_tests: &Path) -> io::Result<()> {
         },
     )?;
 
-    println!("{}", "✅ Successfuly add test.".green());
+    log!(success, "Successfuly add test.");
 
     Ok(())
 }
@@ -867,15 +858,12 @@ pub fn add_standalone_file_link(
         });
 
         put_file(filename, file_cache)?;
-        println!("{}", "✅ Successfuly add test.".green());
+        log!(success, "Successfuly add test.");
 
         return Ok(());
     }
 
-    println!(
-        "{}",
-        format!("🚧 cache for {path:?} not found, start Re-compiling..").yellow()
-    );
+    log!(warn, "Cache for {path:?} not found, start Re-compiling..");
 
     let file = File::open(path)?;
     let reader = io::BufReader::new(file);
@@ -892,9 +880,7 @@ pub fn add_standalone_file_link(
         },
     )?;
 
-    println!("{}", "✅ Successfuly add test.".green());
+    log!(success, "Successfuly add test.");
 
     Ok(())
 }
-
-pub fn config(path: &Path) {}

@@ -1,11 +1,13 @@
 use crate::cache_file::{get_config, put_file, Files, DEFAULT_CACHE_FILE, DEFUALT_BIN_DIR};
-use crate::cache_file::{get_file, FileCache};
+use crate::cache_file::{get_file, FileCache, Test};
 use crate::log;
-use crate::utils::logging::*;
 use crate::utils::sha256_digest;
+use crate::utils::{limited_string, logging::*};
 
 use colored::Colorize;
+use crossterm::terminal;
 use data_encoding::HEXUPPER;
+use std::cmp;
 use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Write};
@@ -190,18 +192,58 @@ pub fn initialize(current_path: &Path) -> io::Result<()> {
     Ok(())
 }
 
+fn test_types_string(tests: &[Test]) -> String {
+    tests
+        .iter()
+        .map(|test| match test {
+            Test::StringTest {
+                input: _,
+                expected_output: _,
+            } => "S".green(),
+            Test::RefTest {
+                input: _,
+                expected_output: _,
+            } => "R".yellow(),
+        })
+        .fold(String::new(), |mut acc, colored_string| {
+            acc.push_str(&colored_string.to_string());
+            acc
+        })
+}
+
 pub fn status() -> io::Result<()> {
     let config = get_config()?;
 
     let tracked_numbers = config.files.len();
     if tracked_numbers == 0 {
-        log!(info, "Tracked nothing..");
+        println!("{}", "Tracked nothing..".red());
         return Ok(());
     }
 
-    log!(info, "Tracked {} files.", tracked_numbers);
+    println!("{}", format!("Tracked {} files.", tracked_numbers).blue());
+
+    let hash_width = cmp::min(cmp::max(0, terminal::size()?.0 as i32) - 44, 65) as usize;
+
+    // Print table headers with colors
+    println!(
+        "{:<4} {:<20} {:<hash_width$} {:<10} {:<10}",
+        "No.".cyan(),
+        "Filename".cyan(),
+        "Hash".cyan(),
+        "Tests".cyan(),
+        "Types".cyan()
+    );
+
+    // Print each file's details with colors
     for (index, (filename, file_cache)) in config.files.iter().enumerate() {
-        println!("{}. {filename}\t{}", index + 1, file_cache.source_hash);
+        println!(
+            "{:<4} {:<20} {:<hash_width$} {:<10} [{}]",
+            (index + 1).to_string().cyan(),
+            limited_string(filename, 20, 1, false).green(),
+            limited_string(&file_cache.source_hash, hash_width, 1, false).blue(),
+            file_cache.tests.len().to_string().magenta(),
+            test_types_string(file_cache.tests.as_slice())
+        );
     }
 
     Ok(())
