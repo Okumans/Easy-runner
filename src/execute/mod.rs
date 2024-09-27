@@ -1,8 +1,8 @@
 use crate::cache_file::{get_config, put_file, Files, DEFAULT_CACHE_FILE, DEFUALT_BIN_DIR};
 use crate::cache_file::{get_file, FileCache, Test};
 use crate::log;
+use crate::utils::limited_string;
 use crate::utils::sha256_digest;
-use crate::utils::{limited_string, logging::*};
 
 use colored::Colorize;
 use crossterm::terminal;

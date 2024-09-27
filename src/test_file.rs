@@ -1,5 +1,4 @@
 use super::cache_file::Test;
-use colored::Colorize;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs::File;

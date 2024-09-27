@@ -1,19 +1,18 @@
 use super::core::ExecutionStatus;
 use super::RunError;
-use crate::cache_file::{get_config, put_file, Files, Test};
-use crate::cache_file::{get_file, FileCache, DEFAULT_CACHE_FILE, DEFUALT_BIN_DIR};
+use crate::cache_file::{get_config, put_file, Test};
+use crate::cache_file::{get_file, FileCache};
 use crate::execute::{core::execute_binary, recompile_binary, ExecutionInput};
 use crate::log;
 use crate::selector_evaluator::evaluate;
 use crate::test_file::{merge_test_file, read_test_file, SimpleTest};
-use crate::utils::{append_extension, limited_string, sha256_digest};
+use crate::utils::{padded_string, sha256_digest};
 use colored::Colorize;
-use core::panic;
 use crossterm::terminal;
 use data_encoding::HEXUPPER;
 use std::error::Error;
 use std::fs::File;
-use std::io::{self, BufReader, Write};
+use std::io::{self, BufReader};
 use std::ops::RangeInclusive;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -42,7 +41,7 @@ pub fn run_at(src_path: &Path, expression: &str) -> Result<(), RunError> {
             file_cache
         }
         Ok(Some(file_cache)) => {
-            log!(warn, "🚧 Re-compiling binary...");
+            log!(warn, "Re-compiling binary...");
 
             recompile_binary(src_path).map_err(RunError::CompilationError)?;
 
@@ -56,7 +55,7 @@ pub fn run_at(src_path: &Path, expression: &str) -> Result<(), RunError> {
             file_cache
         }
         _ => {
-            log!(warn, "🚧 Re-compiling binary...");
+            log!(warn, "Re-compiling binary...");
 
             recompile_binary(src_path).map_err(RunError::CompilationError)?;
 
@@ -75,7 +74,6 @@ pub fn run_at(src_path: &Path, expression: &str) -> Result<(), RunError> {
         log!(info, "No test found.");
         return Ok(());
     }
-
     let range_tests = evaluate(expression)
         .map_err(|err| io::Error::new(io::ErrorKind::Other, err.to_string()))?;
 
@@ -100,12 +98,21 @@ pub fn run_at(src_path: &Path, expression: &str) -> Result<(), RunError> {
                 if let Ok(RunResult::SingleTest {
                     status,
                     time_elapsed,
+                    output,
                 }) = run_core(
                     &file_cache.tests[main_index - 1],
                     src_path,
                     filename,
                     &config.binary_dir_path,
                 ) {
+                    let (input, expected_output) = match &file_cache.tests[main_index - 1] {
+                        Test::StringTest {
+                            input,
+                            expected_output,
+                        } => (input, expected_output),
+                        _ => unreachable!("Because it's a case of output single-test."),
+                    };
+
                     if status {
                         println!(
                             "* ✅ {}{} {} in {}.",
@@ -115,12 +122,34 @@ pub fn run_at(src_path: &Path, expression: &str) -> Result<(), RunError> {
                             format!("{:?}", time_elapsed).green().italic()
                         );
                     } else {
+                        // println!(
+                        //     "* ❌ {}{} {} in {}.",
+                        //     "Test #".purple(),
+                        //     main_index.to_string().yellow(),
+                        //     "failed after".red(),
+                        //     format!("{:?}", time_elapsed).green().italic()
+                        // );
+
+                        let cols = terminal::size()?.0 as usize;
+                        let rows = 15;
+
                         println!(
-                            "* ❌ {}{} {} in {}.",
+                            "* ❌ {}{}. Taking: {}\n{}\n{}\n{}\n{}\n{}\n{}",
                             "Test #".purple(),
                             main_index.to_string().yellow(),
-                            "failed after".red(),
-                            format!("{:?}", time_elapsed).green().italic()
+                            format!("{:?}", time_elapsed).green().italic(),
+                            "Input:".bold(),
+                            padded_string(input, cols, rows, input.lines().count() == 1).blue(),
+                            "Output:".bold(),
+                            padded_string(&output, cols, rows, output.lines().count() == 1).red(),
+                            "Expected-output:".bold(),
+                            padded_string(
+                                expected_output,
+                                cols,
+                                rows,
+                                expected_output.lines().count() == 1
+                            )
+                            .green(),
                         );
                     }
                 }
@@ -285,14 +314,6 @@ pub fn print_ref_testcases_detailed(
 ) -> io::Result<()> {
     let mut current_position = 0; // Track the current position of the iterator
 
-    let padded_string = |content: &str, cols: usize, rows: usize, single_line: bool| -> String {
-        limited_string(content, cols - 2, rows, single_line)
-            .lines()
-            .map(|line| format!("  {}", line)) // Add 2 spaces padding to each line
-            .collect::<Vec<String>>()
-            .join("\n")
-    };
-
     let cols = terminal::size()?.0 as usize;
     let rows = 15;
 
@@ -452,7 +473,16 @@ pub fn run(src_path: &Path) -> Result<(), RunError> {
             Ok(RunResult::SingleTest {
                 status,
                 time_elapsed,
+                output,
             }) => {
+                let (input, expected_output) = match test {
+                    Test::StringTest {
+                        input,
+                        expected_output,
+                    } => (input, expected_output),
+                    _ => unreachable!("Because it's a case of output single-test."),
+                };
+
                 if status {
                     println!(
                         "* ✅ {}{} {} in {}.",
@@ -462,12 +492,34 @@ pub fn run(src_path: &Path) -> Result<(), RunError> {
                         format!("{:?}", time_elapsed).green().italic()
                     );
                 } else {
+                    // println!(
+                    //     "* ❌ {}{} {} in {}.",
+                    //     "Test #".purple(),
+                    //     index.to_string().yellow(),
+                    //     "failed after".red(),
+                    //     format!("{:?}", time_elapsed).green().italic()
+                    // );
+
+                    let cols = terminal::size()?.0 as usize;
+                    let rows = 15;
+
                     println!(
-                        "* ❌ {}{} {} in {}.",
+                        "* ❌ {}{}. Taking: {}\n{}\n{}\n{}\n{}\n{}\n{}",
                         "Test #".purple(),
                         index.to_string().yellow(),
-                        "failed after".red(),
-                        format!("{:?}", time_elapsed).green().italic()
+                        format!("{:?}", time_elapsed).green().italic(),
+                        "Input:".bold(),
+                        padded_string(input, cols, rows, input.lines().count() == 1).blue(),
+                        "Output:".bold(),
+                        padded_string(&output, cols, rows, output.lines().count() == 1).red(),
+                        "Expected-output:".bold(),
+                        padded_string(
+                            expected_output,
+                            cols,
+                            rows,
+                            expected_output.lines().count() == 1
+                        )
+                        .green(),
                     );
                 }
 
@@ -495,13 +547,14 @@ pub fn run(src_path: &Path) -> Result<(), RunError> {
 
                 // printing fancy test.
                 println!(
-                    "\r* {} [{}]{} {} {} in average of {}",
+                    "\r* {} [{}]{} {}{} {} in average of {}",
                     if status { "✅" } else { "❌" },
                     (passed_test as f32 / total_test as f32 * 100.0)
                         .to_string()
                         .yellow(),
                     _ref_testcases_minimized(detailed_status.as_slice()),
                     "Test #".purple(),
+                    index.to_string().yellow().italic(),
                     if status {
                         "completed successfully".green()
                     } else {
@@ -592,6 +645,7 @@ pub enum RunResult {
     SingleTest {
         status: bool,
         time_elapsed: Duration,
+        output: String,
     },
     RefTest {
         status: bool,
@@ -721,13 +775,6 @@ fn _ref_test_run_core(
         });
     }
 
-    fn format_lines(text: &str) -> String {
-        text.split('\n')
-            .map(|line| format!("  {line}"))
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
-
     if run_range.is_some() && !only_run_at_ran {
         return Ok(RunResult::RefTest {
             status: false,
@@ -765,15 +812,18 @@ fn run_core(
                     output,
                     time_elapsed,
                 } => {
-                    if expected_output != String::from_utf8_lossy(&output.stdout).as_ref() {
+                    let output = String::from_utf8_lossy(&output.stdout);
+                    if expected_output != &output {
                         return Ok(RunResult::SingleTest {
                             status: false,
                             time_elapsed,
+                            output: output.into_owned(),
                         });
                     }
                     return Ok(RunResult::SingleTest {
                         status: true,
                         time_elapsed,
+                        output: output.into_owned(),
                     });
                 }
 
@@ -781,6 +831,7 @@ fn run_core(
                     return Ok(RunResult::SingleTest {
                         status: false,
                         time_elapsed: Duration::from_secs(0),
+                        output: String::new(),
                     });
                 }
 

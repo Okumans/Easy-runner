@@ -1,10 +1,11 @@
 use ring::digest;
 use std::io::Read;
-use std::io::{self, Write};
+use std::io::{self};
 use std::path::PathBuf;
 
 // Define the macro in a module
 pub mod logging {
+    #[allow(unused_imports)]
     use colored::Colorize;
 
     #[macro_export]
@@ -109,4 +110,12 @@ pub fn append_extension(extension: &str, path: PathBuf) -> PathBuf {
     os_str.push(".");
     os_str.push(extension);
     os_str.into()
+}
+
+pub fn padded_string(content: &str, cols: usize, rows: usize, single_line: bool) -> String {
+    limited_string(content, cols - 2, rows, single_line)
+        .lines()
+        .map(|line| format!("  {}", line)) // Add 2 spaces padding to each line
+        .collect::<Vec<String>>()
+        .join("\n")
 }

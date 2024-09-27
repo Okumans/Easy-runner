@@ -1,5 +1,5 @@
 use colored::Colorize;
-use easy_runner::{execute, log, utils::logging::*};
+use easy_runner::{execute, log};
 
 use clap::{Parser, Subcommand};
 use std::{fs, path::PathBuf};
