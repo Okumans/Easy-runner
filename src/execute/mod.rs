@@ -167,6 +167,14 @@ pub fn initialize(current_path: &Path) -> io::Result<()> {
                 "c".to_string(),
                 "gcc $(FILE) -o $(BIN_DIR)/$(FILENAME).$(EXE_EXT)".to_string(),
             ),
+            (
+                "py".to_string(),
+                "sh -c 'echo \"#!$(which python3)\" > $(BIN_DIR)/$(FILENAME).$(EXE_EXT); cat $(FILE) >> $(BIN_DIR)/$(FILENAME).$(EXE_EXT); chmod +x $(BIN_DIR)/$(FILENAME).$(EXE_EXT)'".to_string()
+            ),
+            (
+                "rs".to_string(),
+                "rustc $(FILE) -o $(BIN_DIR)/$(FILENAME).$(EXE_EXT)".to_string()
+            )
         ]);
 
         let files = Files {

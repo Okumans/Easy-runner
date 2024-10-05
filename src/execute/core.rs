@@ -1,4 +1,5 @@
 use crate::cache_file::{get_config, template_config_replacement};
+use shell_words;
 use std::ffi;
 use std::io;
 use std::io::Write;
@@ -37,12 +38,14 @@ pub fn recompile_binary(src_path: &Path) -> Result<(), String> {
     template_config_replacement(&mut sys_call, config.binary_dir_path.as_path(), src_path)
         .map_err(|err| format!("Template error: {}", err))?;
 
-    let sys_call: Vec<&str> = sys_call.split_whitespace().collect();
+    let sys_call: Vec<String> =
+        shell_words::split(&sys_call).map_err(|_| "Failed to parse command".to_string())?;
+
     if sys_call.is_empty() {
         return Err("System call command is empty".to_string());
     }
 
-    let command = sys_call[0];
+    let command = &sys_call[0];
     let args = &sys_call[1..];
 
     let output = Command::new(command)

@@ -813,7 +813,7 @@ fn run_core(
                     time_elapsed,
                 } => {
                     let output = String::from_utf8_lossy(&output.stdout);
-                    if expected_output != &output {
+                    if expected_output != output.trim() {
                         return Ok(RunResult::SingleTest {
                             status: false,
                             time_elapsed,
