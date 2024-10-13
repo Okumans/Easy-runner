@@ -411,7 +411,7 @@ pub fn _ref_testcases_minimized(detailed_statuses: &[DetailedStatus]) -> String 
     result
 }
 
-pub fn run(src_path: &Path) -> Result<(), RunError> {
+pub fn run(src_path: &Path, force_recompile: bool) -> Result<(), RunError> {
     assert!(src_path.exists());
 
     let filename = src_path.file_name().unwrap().to_str().unwrap();
@@ -427,7 +427,7 @@ pub fn run(src_path: &Path) -> Result<(), RunError> {
     }
 
     let file_cache = match get_file(filename) {
-        Ok(Some(file_cache)) if file_cache.source_hash == target_hashed => {
+        Ok(Some(file_cache)) if file_cache.source_hash == target_hashed && !force_recompile => {
             log!(info, "Cache hit for {src_path:?}. Skipping recompilation.");
             file_cache
         }

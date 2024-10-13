@@ -23,7 +23,20 @@ enum CommandTest {
     RunAt {
         expression: String,
     },
-    Run,
+    Run {
+        #[arg(long, short, help = "Force recompilation of the project")]
+        force_recompile: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum CommandCache {
+    Clean,
+    Purge,
+    Recompile {
+        #[arg(long, short, help = "Force recompilation of all registered file")]
+        all: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -42,6 +55,10 @@ enum Command {
 
     Status,
     Init,
+    Cache {
+        #[command(subcommand)]
+        command: CommandCache,
+    },
 }
 
 #[derive(Debug, Parser)]
@@ -135,8 +152,8 @@ fn main() {
                     execute::test::run_at(&path, &expression)
                         .expect("Failed to run test-at index.");
                 }
-                CommandTest::Run => {
-                    execute::test::run(&path).expect("Failed to run executable.");
+                CommandTest::Run { force_recompile } => {
+                    execute::test::run(&path, force_recompile).expect("Failed to run executable.");
                 }
             }
         }
@@ -154,12 +171,19 @@ fn main() {
             }
 
             let path = fs::canonicalize(path).expect("Unable to canonicalize path");
-            execute::run(&path).expect("Failed to the run file.");
+            execute::run(&path, force_recompile).expect("Failed to the run file.");
         }
 
         Command::Status => execute::status().expect("Failed to show status."),
         Command::Init => {
             execute::initialize(&current_dir).expect("Failed to initialize erunner cache.")
         }
+
+        Command::Cache { command } => match command {
+            CommandCache::Clean => execute::cache::clean().expect("Failed to clean erunner cache."),
+            CommandCache::Purge => execute::cache::purge().expect("Failed to purge erunner cache."),
+            CommandCache::Recompile { all } => execute::cache::recompile(all)
+                .expect("Failed to recompile erunner registered files."),
+        },
     }
 }

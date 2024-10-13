@@ -1,5 +1,7 @@
-use crate::cache_file::{get_config, put_file, Files, DEFAULT_CACHE_FILE, DEFUALT_BIN_DIR};
-use crate::cache_file::{get_file, FileCache, Test};
+use crate::cache_file::{
+    get_config, get_file, put_config, put_file, FileCache, Files, Test, DEFAULT_CACHE_FILE,
+    DEFUALT_BIN_DIR,
+};
 use crate::log;
 use crate::utils::limited_string;
 use crate::utils::sha256_digest;
@@ -14,6 +16,7 @@ use std::io::{self, Write};
 use std::path::Path;
 use thiserror::Error;
 
+pub mod cache;
 pub mod core;
 pub mod test;
 
@@ -31,7 +34,7 @@ pub enum RunError {
     Other(String),
 }
 
-pub fn run(path: &Path) -> Result<(), RunError> {
+pub fn run(path: &Path, force_recompile: bool) -> Result<(), RunError> {
     assert!(path.exists());
 
     let filename = path.file_name().unwrap().to_str().unwrap();
@@ -43,11 +46,18 @@ pub fn run(path: &Path) -> Result<(), RunError> {
     let config = get_config()?; // Assume get_config returns io::Result
 
     match get_file(filename) {
-        Ok(Some(file_cache)) if file_cache.source_hash == target_hashed => {
+        Ok(Some(file_cache)) if file_cache.source_hash == target_hashed && !force_recompile => {
             log!(info, "Cache hit for {path:?}. Skipping recompilation.");
         }
         Ok(Some(file_cache)) => {
-            log!(warn, "Source file {path:?} has changed. Recompiling...");
+            if force_recompile {
+                log!(
+                    warn,
+                    "Force recompilation Source file {path:?}. Recompiling..."
+                );
+            } else {
+                log!(warn, "Source file {path:?} has changed. Recompiling...");
+            }
 
             recompile_binary(path).map_err(RunError::CompilationError)?;
 
@@ -64,7 +74,14 @@ pub fn run(path: &Path) -> Result<(), RunError> {
             put_file(filename, file_cache.clone())?;
         }
         _ => {
-            log!(warn, "No cache entry found for {path:?}. Recompiling...");
+            if force_recompile {
+                log!(
+                    warn,
+                    "Force recompilation Source file {path:?}. Recompiling..."
+                );
+            } else {
+                log!(warn, "Source file {path:?} has changed. Recompiling...");
+            }
 
             recompile_binary(path).map_err(RunError::CompilationError)?;
 
@@ -230,25 +247,55 @@ pub fn status() -> io::Result<()> {
 
     println!("{}", format!("Tracked {} files.", tracked_numbers).blue());
 
-    let hash_width = cmp::min(cmp::max(0, terminal::size()?.0 as i32) - 44, 65) as usize;
+    let hash_width = cmp::min(cmp::max(0, terminal::size()?.0 as i32) - 55, 65) as usize;
 
     // Print table headers with colors
     println!(
-        "{:<4} {:<20} {:<hash_width$} {:<10} {:<10}",
+        "{:<4} {:<20} {:<6} {:<hash_width$} {:<10} {:<10}",
         "No.".cyan(),
         "Filename".cyan(),
-        "Hash".cyan(),
+        "Exists".cyan(),
+        "  Hash".cyan(),
         "Tests".cyan(),
         "Types".cyan()
     );
 
     // Print each file's details with colors
     for (index, (filename, file_cache)) in config.files.iter().enumerate() {
+        let file_exists = Path::new(filename).exists();
+        let target_hashed: Option<String> = if file_exists {
+            Some(
+                HEXUPPER
+                    .encode(sha256_digest(io::BufReader::new(fs::File::open(filename)?))?.as_ref()),
+            )
+        } else {
+            None
+        };
+
         println!(
-            "{:<4} {:<20} {:<hash_width$} {:<10} [{}]",
+            "{:<4} {:<20} {:<6}   {:<hash_width$} {:<10} [{}]",
             (index + 1).to_string().cyan(),
-            limited_string(filename, 20, 1, false).green(),
-            limited_string(&file_cache.source_hash, hash_width, 1, false).blue(),
+            if !file_exists {
+                limited_string(filename, 20, 1, false).red().strikethrough()
+            } else if file_cache.source_hash == target_hashed.clone().unwrap() {
+                limited_string(filename, 20, 1, false).green()
+            } else {
+                limited_string(filename, 20, 1, false).yellow()
+            },
+            if file_exists {
+                "  /".green()
+            } else {
+                "  X".red()
+            },
+            if !file_exists {
+                limited_string(&file_cache.source_hash, hash_width, 1, false)
+                    .red()
+                    .strikethrough()
+            } else if file_cache.source_hash == target_hashed.unwrap() {
+                limited_string(&file_cache.source_hash, hash_width, 1, false).blue()
+            } else {
+                limited_string(&file_cache.source_hash, hash_width, 1, false).yellow()
+            },
             file_cache.tests.len().to_string().magenta(),
             test_types_string(file_cache.tests.as_slice())
         );
