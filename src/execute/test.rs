@@ -720,6 +720,7 @@ fn _ref_test_run_core(
 
     #[allow(clippy::explicit_counter_loop)]
     for (inner_index, test) in test_iterator.enumerate() {
+        dbg!("current at {inner_index}");
         if let Some(run_range) = run_range {
             if !run_range.contains(&(inner_index + 1)) {
                 continue;
