@@ -1,10 +1,14 @@
 use crate::cache_file::{get_config, template_config_replacement};
+use crate::log;
+use colored::Colorize;
 use shell_words;
 use std::ffi;
 use std::io;
+use std::io::BufWriter;
 use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
+use std::thread;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -98,17 +102,32 @@ pub fn execute_binary(
             )
         })?;
 
-    // Handle custom input if provided
-    if let ExecutionInput::CustomInput(input_data) = &input {
-        if let Some(child_stdin) = child.stdin.as_mut() {
-            child_stdin.write_all(input_data.as_bytes())?;
-        } else {
-            return Ok(ExecutionStatus::Failed(
-                "Failed to access stdin of child process".to_string(),
-            ));
+    // Handle custom input in a separate thread
+    if let ExecutionInput::CustomInput(input_data) = input {
+        if let Some(child_stdin) = child.stdin.take() {
+            let input_data = input_data.clone();
+
+            // Spawn a new thread to write input in chunks
+            thread::spawn(move || {
+                let mut writer = BufWriter::new(child_stdin);
+                const CHUNK_SIZE: usize = 1024;
+
+                for chunk in input_data.as_bytes().chunks(CHUNK_SIZE) {
+                    if writer.write_all(chunk).is_err() {
+                        log!(error, "failed to write chunk to child process stdin. The process may have closed its stdin or encountered an error.");
+                        break;
+                    }
+                }
+
+                if writer.flush().is_err() {
+                    log!(
+                        error,
+                        "failed to flush remaining data to child process stdin."
+                    );
+                }
+            });
         }
     }
-
     let output = child.wait_with_output().map_err(|err| {
         io::Error::new(
             io::ErrorKind::Other,

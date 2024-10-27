@@ -23,6 +23,13 @@ impl SimpleTest {
             expected_output: String::new(),
         }
     }
+
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            input: String::with_capacity(capacity),
+            expected_output: String::with_capacity(capacity),
+        }
+    }
 }
 
 impl ModifierState {
@@ -47,13 +54,13 @@ pub struct TestFileIterator {
 impl TestFileIterator {
     fn new(test_file_path: &Path) -> Result<Self, Box<dyn Error>> {
         let file = File::open(test_file_path)?;
-        let reader = BufReader::new(file);
+        let reader = BufReader::with_capacity(32 * 1024, file);
 
         Ok(Self {
             reader,
-            buffer: String::with_capacity(1024), // Initial capacity for large buffer
+            buffer: String::with_capacity(4096), // Initial capacity for large buffer
             stack: 0,
-            test_buffer: SimpleTest::new(),
+            test_buffer: SimpleTest::with_capacity(4096),
             arrow_amount: 0,
             states: HashMap::from([
                 ("standalone", false),
@@ -239,3 +246,4 @@ pub fn merge_test_file(
 ) -> Result<MergedTestFileTterator, Box<dyn Error>> {
     MergedTestFileTterator::new(input_test_file_iterator, output_test_file_iterator)
 }
+
