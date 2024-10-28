@@ -1,5 +1,5 @@
 use colored::Colorize;
-use easy_runner::{execute, log, utils::logging::*};
+use easy_runner::{execute, log};
 
 use clap::{Parser, Subcommand};
 use std::{fs, path::PathBuf};
@@ -22,10 +22,19 @@ enum CommandTest {
     },
     RunAt {
         expression: String,
+
+        #[arg(long, short, help = "Force recompilation of the project")]
+        force_recompile: bool,
+
+        #[arg(long, short, help = "Show full result of the process.")]
+        show_full: bool,
     },
     Run {
         #[arg(long, short, help = "Force recompilation of the project")]
         force_recompile: bool,
+
+        #[arg(long, short, help = "Show full result of the process.")]
+        show_full: bool,
     },
 }
 
@@ -148,12 +157,20 @@ fn main() {
                     }
                 }
 
-                CommandTest::RunAt { expression } => {
-                    execute::test::run_at(&path, &expression)
+                CommandTest::RunAt {
+                    expression,
+                    force_recompile,
+                    show_full,
+                } => {
+                    execute::test::run_at(&path, &expression, force_recompile, show_full)
                         .expect("Failed to run test-at index.");
                 }
-                CommandTest::Run { force_recompile } => {
-                    execute::test::run(&path, force_recompile).expect("Failed to run executable.");
+                CommandTest::Run {
+                    force_recompile,
+                    show_full,
+                } => {
+                    execute::test::run(&path, force_recompile, show_full)
+                        .expect("Failed to run executable.");
                 }
             }
         }
