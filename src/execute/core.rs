@@ -1,9 +1,14 @@
 use crate::cache_file::{get_config, template_config_replacement};
+use crate::log;
+use colored::Colorize;
+use shell_words;
 use std::ffi;
 use std::io;
+use std::io::BufWriter;
 use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
+use std::thread;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -37,12 +42,14 @@ pub fn recompile_binary(src_path: &Path) -> Result<(), String> {
     template_config_replacement(&mut sys_call, config.binary_dir_path.as_path(), src_path)
         .map_err(|err| format!("Template error: {}", err))?;
 
-    let sys_call: Vec<&str> = sys_call.split_whitespace().collect();
+    let sys_call: Vec<String> =
+        shell_words::split(&sys_call).map_err(|_| "Failed to parse command".to_string())?;
+
     if sys_call.is_empty() {
         return Err("System call command is empty".to_string());
     }
 
-    let command = sys_call[0];
+    let command = &sys_call[0];
     let args = &sys_call[1..];
 
     let output = Command::new(command)
@@ -95,17 +102,32 @@ pub fn execute_binary(
             )
         })?;
 
-    // Handle custom input if provided
-    if let ExecutionInput::CustomInput(input_data) = &input {
-        if let Some(child_stdin) = child.stdin.as_mut() {
-            child_stdin.write_all(input_data.as_bytes())?;
-        } else {
-            return Ok(ExecutionStatus::Failed(
-                "Failed to access stdin of child process".to_string(),
-            ));
+    // Handle custom input in a separate thread
+    if let ExecutionInput::CustomInput(input_data) = input {
+        if let Some(child_stdin) = child.stdin.take() {
+            let input_data = input_data.clone();
+
+            // Spawn a new thread to write input in chunks
+            thread::spawn(move || {
+                let mut writer = BufWriter::new(child_stdin);
+                const CHUNK_SIZE: usize = 1024;
+
+                for chunk in input_data.as_bytes().chunks(CHUNK_SIZE) {
+                    if writer.write_all(chunk).is_err() {
+                        log!(error, "failed to write chunk to child process stdin. The process may have closed its stdin or encountered an error.");
+                        break;
+                    }
+                }
+
+                if writer.flush().is_err() {
+                    log!(
+                        error,
+                        "failed to flush remaining data to child process stdin."
+                    );
+                }
+            });
         }
     }
-
     let output = child.wait_with_output().map_err(|err| {
         io::Error::new(
             io::ErrorKind::Other,

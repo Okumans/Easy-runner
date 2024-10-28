@@ -182,3 +182,20 @@ pub fn get_config() -> io::Result<Files> {
     let files: Files = serde_json::from_reader(reader)?;
     Ok(files)
 }
+
+pub fn put_config(config: Files) -> io::Result<()> {
+    let cache_file_path = Path::new(".").join(DEFAULT_CACHE_FILE);
+
+    if !cache_file_path.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "Cache file not found",
+        ));
+    }
+
+    let file = fs::File::create(&cache_file_path)?;
+    let mut writer = io::BufWriter::new(file);
+    serde_json::to_writer_pretty(&mut writer, &config)?;
+
+    Ok(())
+}

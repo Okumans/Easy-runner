@@ -17,7 +17,12 @@ use std::ops::RangeInclusive;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-pub fn run_at(src_path: &Path, expression: &str) -> Result<(), RunError> {
+pub fn run_at(
+    src_path: &Path,
+    expression: &str,
+    force_recompile: bool,
+    show_full: bool,
+) -> Result<(), RunError> {
     assert!(src_path.exists());
 
     let filename = src_path.file_name().unwrap().to_str().unwrap();
@@ -33,7 +38,7 @@ pub fn run_at(src_path: &Path, expression: &str) -> Result<(), RunError> {
     }
 
     let file_cache = match get_file(filename) {
-        Ok(Some(file_cache)) if file_cache.source_hash == target_hashed => {
+        Ok(Some(file_cache)) if file_cache.source_hash == target_hashed && !force_recompile => {
             log!(
                 info,
                 "Cache for {src_path:?} is matched, skip re-compiling.."
@@ -89,7 +94,6 @@ pub fn run_at(src_path: &Path, expression: &str) -> Result<(), RunError> {
             return Ok(());
         }
 
-        // TODO: Show input, output and expected_output when testcase failed.
         match &file_cache.tests[main_index - 1] {
             Test::StringTest {
                 input: _,
@@ -122,14 +126,6 @@ pub fn run_at(src_path: &Path, expression: &str) -> Result<(), RunError> {
                             format!("{:?}", time_elapsed).green().italic()
                         );
                     } else {
-                        // println!(
-                        //     "* ❌ {}{} {} in {}.",
-                        //     "Test #".purple(),
-                        //     main_index.to_string().yellow(),
-                        //     "failed after".red(),
-                        //     format!("{:?}", time_elapsed).green().italic()
-                        // );
-
                         let cols = terminal::size()?.0 as usize;
                         let rows = 15;
 
@@ -203,6 +199,7 @@ pub fn run_at(src_path: &Path, expression: &str) -> Result<(), RunError> {
                                 _test_iterator(input, expected_output.as_ref())
                                     .map_err(RunError::Other)?,
                                 detailed_status.as_slice(),
+                                show_full,
                             )?;
 
                             // printing fancy test.
@@ -270,6 +267,7 @@ pub fn run_at(src_path: &Path, expression: &str) -> Result<(), RunError> {
                             _test_iterator(input, expected_output.as_ref())
                                 .map_err(RunError::Other)?,
                             detailed_status.as_slice(),
+                            show_full,
                         )?;
                         println!(
                             "\r* {} [{}]{} {}{} {} in average of {}",
@@ -311,6 +309,7 @@ pub fn run_at(src_path: &Path, expression: &str) -> Result<(), RunError> {
 pub fn print_ref_testcases_detailed(
     mut test_iterator: TestIterator, // Mutable iterator so we can advance it
     detailed_statuses: &[DetailedStatus],
+    ignore_terminal_size: bool,
 ) -> io::Result<()> {
     let mut current_position = 0; // Track the current position of the iterator
 
@@ -360,23 +359,35 @@ pub fn print_ref_testcases_detailed(
                         .green()
                         .italic(),
                     "Input:".bold(),
-                    padded_string(&input, cols, rows, input.lines().count() == 1).blue(),
+                    if ignore_terminal_size {
+                        input.blue()
+                    } else {
+                        padded_string(&input, cols, rows, input.lines().count() == 1).blue()
+                    },
                     "Output:".bold(),
-                    padded_string(
-                        &detailed_status.output,
-                        cols,
-                        rows,
-                        detailed_status.output.lines().count() == 1
-                    )
-                    .red(),
+                    if ignore_terminal_size {
+                        detailed_status.output.red()
+                    } else {
+                        padded_string(
+                            &detailed_status.output,
+                            cols,
+                            rows,
+                            detailed_status.output.lines().count() == 1,
+                        )
+                        .red()
+                    },
                     "Expected-output:".bold(),
-                    padded_string(
-                        &expected_output,
-                        cols,
-                        rows,
-                        expected_output.lines().count() == 1
-                    )
-                    .green(),
+                    if ignore_terminal_size {
+                        expected_output.green()
+                    } else {
+                        padded_string(
+                            &expected_output,
+                            cols,
+                            rows,
+                            expected_output.lines().count() == 1,
+                        )
+                        .green()
+                    },
                 );
             }
 
@@ -411,7 +422,7 @@ pub fn _ref_testcases_minimized(detailed_statuses: &[DetailedStatus]) -> String 
     result
 }
 
-pub fn run(src_path: &Path) -> Result<(), RunError> {
+pub fn run(src_path: &Path, force_recompile: bool, show_full: bool) -> Result<(), RunError> {
     assert!(src_path.exists());
 
     let filename = src_path.file_name().unwrap().to_str().unwrap();
@@ -427,7 +438,7 @@ pub fn run(src_path: &Path) -> Result<(), RunError> {
     }
 
     let file_cache = match get_file(filename) {
-        Ok(Some(file_cache)) if file_cache.source_hash == target_hashed => {
+        Ok(Some(file_cache)) if file_cache.source_hash == target_hashed && !force_recompile => {
             log!(info, "Cache hit for {src_path:?}. Skipping recompilation.");
             file_cache
         }
@@ -543,6 +554,7 @@ pub fn run(src_path: &Path) -> Result<(), RunError> {
                 print_ref_testcases_detailed(
                     _test_iterator(input, expected_output.as_ref()).map_err(RunError::Other)?,
                     detailed_status.as_slice(),
+                    show_full,
                 )?;
 
                 // printing fancy test.
@@ -813,7 +825,7 @@ fn run_core(
                     time_elapsed,
                 } => {
                     let output = String::from_utf8_lossy(&output.stdout);
-                    if expected_output != &output {
+                    if expected_output != output.trim() {
                         return Ok(RunResult::SingleTest {
                             status: false,
                             time_elapsed,

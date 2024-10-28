@@ -13,3 +13,7 @@ crossterm = "*"
 itertools = "*"
 colored = "2.0"
 thiserror = "1.0"
+shell-words = "1.1"
+
+# [profile.release]
+# debug = true
