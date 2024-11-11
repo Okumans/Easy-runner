@@ -12,7 +12,7 @@ use crossterm::terminal;
 use data_encoding::HEXUPPER;
 use std::error::Error;
 use std::fs::File;
-use std::io::{self, BufReader};
+use std::io::{self, BufReader, Write};
 use std::ops::RangeInclusive;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -103,7 +103,7 @@ pub fn run_at(
                     status,
                     time_elapsed,
                     output,
-                }) = run_core(
+                }) = run_tests(
                     &file_cache.tests[main_index - 1],
                     src_path,
                     filename,
@@ -156,12 +156,13 @@ pub fn run_at(
                 expected_output,
             } => match range_test.sub_tests {
                 Some(sub_tests) => {
-                    let Ok(ref_test_result) = _ref_test_run_core(
+                    let Ok(ref_test_result) = run_referenced_tests(
                         src_path,
                         _test_iterator(input, expected_output.as_ref()).map_err(RunError::Other)?,
                         filename,
                         &config.binary_dir_path,
                         Some(&sub_tests),
+                        None,
                     ) else {
                         println!(
                             "\r* ❌ Some test in {}.{} - {}.{}  is cooked",
@@ -256,11 +257,12 @@ pub fn run_at(
                         total_test,
                         passed_test,
                         detailed_status,
-                    }) = _ref_test_run_core(
+                    }) = run_referenced_tests(
                         src_path,
                         _test_iterator(input, expected_output.as_ref()).map_err(RunError::Other)?,
                         filename,
                         &config.binary_dir_path,
+                        None,
                         None,
                     ) {
                         print_ref_testcases_detailed(
@@ -341,7 +343,7 @@ pub fn print_ref_testcases_detailed(
 
             if detailed_status.status {
                 println!(
-                    "[{}] {}{}. Taking: {}",
+                    "\r[{}] {}{}. Taking: {}",
                     "P".green(),
                     "SubTest #".purple().bold(),
                     (index + 1).to_string().yellow(),
@@ -351,7 +353,7 @@ pub fn print_ref_testcases_detailed(
                 );
             } else {
                 println!(
-                    "[{}] {}{}. Taking: {}\n{}\n{}\n{}\n{}\n{}\n{}",
+                    "\r[{}] {}{}. Taking: {}\n{}\n{}\n{}\n{}\n{}\n{}",
                     "-".red(),
                     "SubTest #".purple().bold(),
                     index.to_string().yellow(),
@@ -480,7 +482,7 @@ pub fn run(src_path: &Path, force_recompile: bool, show_full: bool) -> Result<()
     }
 
     for (index, test) in file_cache.tests.iter().enumerate() {
-        score += match run_core(test, src_path, filename, &config.binary_dir_path) {
+        score += match run_tests(test, src_path, filename, &config.binary_dir_path) {
             Ok(RunResult::SingleTest {
                 status,
                 time_elapsed,
@@ -717,18 +719,86 @@ fn _test_iterator(
     Ok(test_iterator)
 }
 
-fn _ref_test_run_core(
+fn compare_output(output: &str, expected: &str) -> bool {
+    output.lines().map(str::trim).collect::<String>()
+        == expected.lines().map(str::trim).collect::<String>()
+}
+
+fn execute_test(
+    src_path: &Path,
+    binary_dir_path: &Path,
+    filename: &str,
+    input: &str,
+    expected_output: &str,
+) -> Result<(bool, String, Duration), RunError> {
+    loop {
+        let execution_status = execute_binary(
+            binary_dir_path,
+            filename,
+            ExecutionInput::CustomInput(input.to_string()),
+        )?;
+
+        match execution_status {
+            ExecutionStatus::Successful {
+                output,
+                time_elapsed,
+            } => {
+                let output_str =
+                    String::from_utf8(output.stdout).expect("Unable to convert stdout to utf8");
+                let success = compare_output(&output_str, expected_output);
+                return Ok((success, output_str, time_elapsed));
+            }
+            ExecutionStatus::NeedRecompilation => {
+                log!(warn, "Recompiling binary as needed.");
+                recompile_binary(src_path).map_err(RunError::CompilationError)?;
+                log!(success, "Recompiled successfully: {:?}", src_path);
+            }
+            ExecutionStatus::Failed(_) => {
+                return Ok((false, String::new(), Duration::from_secs(0)));
+            }
+        }
+    }
+}
+
+struct LogProgressParams<'a> {
+    index: usize,
+    score: usize,
+    input: &'a str,
+    expected_output: &'a str,
+}
+
+fn default_referenced_tests_logger(
+    LogProgressParams {
+        index,
+        score,
+        input: _,
+        expected_output: _,
+    }: LogProgressParams,
+) {
+    print!(
+        "\r[{}{}{}] testing {}{}.",
+        score.to_string().yellow(),
+        "/".purple(),
+        index.to_string().yellow(),
+        "SubTest #".purple(),
+        index.to_string().yellow()
+    );
+    std::io::stdout().flush().expect("Unable to flush stdout.");
+}
+
+fn run_referenced_tests(
     src_path: &Path,
     test_iterator: TestIterator,
     guarantree_filename: &str,
     guarantree_binary_dir_path: &Path,
     run_range: Option<&RangeInclusive<usize>>,
+    log_progress: Option<fn(LogProgressParams)>,
 ) -> Result<RunResult, RunError> {
-    let mut inner_score: usize = 0;
-    let mut total_inner_tests: usize = 0;
+    let mut inner_score = 0;
+    let mut total_inner_tests = 0;
     let mut tests_pass = true;
-    let mut only_run_at_ran: bool = false;
-    let mut detailed_status: Vec<DetailedStatus> = Vec::new();
+    let mut only_run_at_ran = false;
+    let mut detailed_status = Vec::new();
 
     #[allow(clippy::explicit_counter_loop)]
     for (inner_index, test) in test_iterator.enumerate() {
@@ -739,43 +809,31 @@ fn _ref_test_run_core(
             only_run_at_ran = true;
         }
 
-        let Ok(SimpleTest {
+        let SimpleTest {
             input,
             expected_output,
-        }) = test
-        else {
-            break;
+        } = match test {
+            Ok(test) => test,
+            Err(_) => break,
         };
+
+        if let Some(logger) = log_progress {
+            logger(LogProgressParams {
+                index: inner_index,
+                score: inner_score,
+                input: &input,
+                expected_output: &expected_output,
+            });
+        }
 
         total_inner_tests += 1;
-        let (status, executed_output, time_elapsed) = loop {
-            let execution_status = execute_binary(
-                guarantree_binary_dir_path,
-                guarantree_filename,
-                ExecutionInput::CustomInput(input.clone()),
-            )?;
-
-            match execution_status {
-                ExecutionStatus::Successful {
-                    output,
-                    time_elapsed,
-                } => {
-                    let output_str =
-                        String::from_utf8(output.stdout).expect("Unable to convert stdout to utf8");
-                    let success = expected_output.trim() == output_str.trim();
-                    break (success, output_str, time_elapsed); // Exit loop with success and output
-                }
-                ExecutionStatus::NeedRecompilation => {
-                    log!(warn, "Recompiling need. pending recompilation.");
-                    recompile_binary(src_path).map_err(RunError::CompilationError)?;
-                    log!(success, "Successful compiling {src_path:?}");
-                }
-                ExecutionStatus::Failed(_) => {
-                    // Log the error and skip the current test
-                    break (false, String::new(), Duration::from_secs(0));
-                }
-            }
-        };
+        let (status, executed_output, time_elapsed) = execute_test(
+            src_path,
+            guarantree_binary_dir_path,
+            guarantree_filename,
+            &input,
+            &expected_output,
+        )?;
 
         tests_pass &= status;
         inner_score += status as usize;
@@ -804,7 +862,7 @@ fn _ref_test_run_core(
     })
 }
 
-fn run_core(
+fn run_tests(
     test: &Test,
     src_path: &Path,
     guarantree_filename: &str,
@@ -814,63 +872,60 @@ fn run_core(
         Test::StringTest {
             input,
             expected_output,
-        } => loop {
-            match execute_binary(
+        } => {
+            let (status, executed_output, time_elapsed) = execute_test(
+                src_path,
                 guarantree_binary_dir_path,
                 guarantree_filename,
-                ExecutionInput::CustomInput(input.clone()),
-            )? {
-                ExecutionStatus::Successful {
-                    output,
-                    time_elapsed,
-                } => {
-                    let output = String::from_utf8_lossy(&output.stdout);
-                    if expected_output != output.trim() {
-                        return Ok(RunResult::SingleTest {
-                            status: false,
-                            time_elapsed,
-                            output: output.into_owned(),
-                        });
-                    }
-                    return Ok(RunResult::SingleTest {
-                        status: true,
-                        time_elapsed,
-                        output: output.into_owned(),
-                    });
-                }
+                input,
+                expected_output,
+            )?;
 
-                ExecutionStatus::Failed(_) => {
-                    return Ok(RunResult::SingleTest {
-                        status: false,
-                        time_elapsed: Duration::from_secs(0),
-                        output: String::new(),
-                    });
-                }
-
-                ExecutionStatus::NeedRecompilation => {
-                    log!(warn, "Recompiling need. pending recompilation.");
-                    recompile_binary(src_path).map_err(RunError::CompilationError)?;
-                    log!(success, "Successful compiling {src_path:?}");
-                }
-            }
-        },
+            Ok(RunResult::SingleTest {
+                status,
+                time_elapsed,
+                output: executed_output,
+            })
+        }
 
         Test::RefTest {
             input,
             expected_output,
-        } => _ref_test_run_core(
+        } => run_referenced_tests(
             src_path,
             _test_iterator(input, expected_output.as_ref()).map_err(RunError::Other)?,
             guarantree_filename,
             guarantree_binary_dir_path,
             None,
+            Some(default_referenced_tests_logger),
         ),
     }
 }
 
 pub fn add_file_link(path: &Path, file_tests: &Path) -> io::Result<()> {
-    assert!(path.exists() && file_tests.exists());
-    let filename = path.file_name().unwrap().to_str().unwrap();
+    assert!(path.exists(), "Provided path does not exist.");
+    assert!(file_tests.exists(), "Test file path does not exist.");
+
+    let filename = path.file_name().and_then(|f| f.to_str()).ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "Failed to extract file name.")
+    })?;
+
+    let file_path = Path::new(file_tests);
+
+    if file_path.is_dir() {
+        log!(error, "Test file cannot be a directory: {:?}", file_path);
+        return Ok(());
+    }
+
+    if let Some(extension) = file_path.extension() {
+        if extension != "etest" {
+            log!(
+                warn,
+                "Expected file extension '.etest', but found '.{}'",
+                extension.to_string_lossy()
+            );
+        }
+    }
 
     if let Ok(Some(mut file_cache)) = get_file(filename) {
         file_cache.tests.push(Test::RefTest {
@@ -879,12 +934,19 @@ pub fn add_file_link(path: &Path, file_tests: &Path) -> io::Result<()> {
         });
 
         put_file(filename, file_cache)?;
-        log!(success, "Successfuly add test.");
-
+        log!(
+            success,
+            "Test added successfully to cache for file: {:?}",
+            filename
+        );
         return Ok(());
     }
 
-    log!(warn, "Cache for {path:?} not found, start Re-compiling..");
+    log!(
+        warn,
+        "Cache for {:?} not found. Starting compilation.",
+        path
+    );
 
     let file = File::open(path)?;
     let reader = io::BufReader::new(file);
@@ -901,7 +963,11 @@ pub fn add_file_link(path: &Path, file_tests: &Path) -> io::Result<()> {
         },
     )?;
 
-    log!(success, "Successfuly add test.");
+    log!(
+        success,
+        "Test added successfully after compilation for file: {:?}",
+        filename
+    );
 
     Ok(())
 }

@@ -10,7 +10,7 @@ enum CommandTest {
         input: String,
         output: String,
     },
-    AddLink {
+    Link {
         #[arg(help = "Path to the tests")]
         tests: PathBuf,
 
@@ -109,7 +109,7 @@ fn main() {
                     execute::test::add(&path, &input, &output).expect("Failed to add test.");
                 }
 
-                CommandTest::AddLink {
+                CommandTest::Link {
                     tests,
                     standalone,
                     output,
