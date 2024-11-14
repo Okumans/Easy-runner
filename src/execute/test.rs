@@ -203,6 +203,11 @@ pub fn run_at(
                                 show_full,
                             )?;
 
+                            if total_test == 0 {
+                                log!(warn, "Testfile for testcase #{main_index} is empty.");
+                                continue;
+                            }
+
                             // printing fancy test.
                             println!(
                                 "\r* {} [{}]{} {}{} {} in average of {}",
@@ -271,6 +276,12 @@ pub fn run_at(
                             detailed_status.as_slice(),
                             show_full,
                         )?;
+
+                        if total_test == 0 {
+                            log!(warn, "Testfile for testcase #{main_index} is empty.");
+                            continue;
+                        }
+
                         println!(
                             "\r* {} [{}]{} {}{} {} in average of {}",
                             if status { "✅" } else { "❌" },
@@ -558,6 +569,11 @@ pub fn run(src_path: &Path, force_recompile: bool, show_full: bool) -> Result<()
                     detailed_status.as_slice(),
                     show_full,
                 )?;
+
+                if total_test == 0 {
+                    log!(warn, "Testfile for testcase #{index} is empty.");
+                    continue;
+                }
 
                 // printing fancy test.
                 println!(
