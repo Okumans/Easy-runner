@@ -40,6 +40,8 @@ pub fn purge() -> io::Result<()> {
 
 pub fn clean() -> io::Result<()> {
     let config = get_config()?;
+
+    let original_files_length = config.files.len();
     let mut cleaned_files: HashMap<String, FileCache> = HashMap::new();
 
     for (filename, file_cache) in config.files {
@@ -48,7 +50,7 @@ pub fn clean() -> io::Result<()> {
         }
     }
 
-    let cleaned_files_length = cleaned_files.len();
+    let cleaned_files_length = original_files_length - cleaned_files.len();
 
     put_config(Files {
         files: cleaned_files,
@@ -66,25 +68,31 @@ pub fn clean() -> io::Result<()> {
 }
 
 pub fn recompile(all: bool) -> io::Result<()> {
-    let config = get_config()?;
+    let mut config = get_config()?;
     let mut recompiled_numbers = 0u32;
 
-    for filename in config.files.keys() {
+    for (filename, file_cache) in &mut config.files {
         if Path::new(filename).exists() {
             let target_hashed = HEXUPPER
                 .encode(sha256_digest(io::BufReader::new(fs::File::open(filename)?))?.as_ref());
 
-            if all || target_hashed != config.files.get(filename).unwrap().source_hash {
-                recompile_binary(&fs::canonicalize(Path::new(filename))?).map_err(|err| {
-                    io::Error::new(
-                        io::ErrorKind::Other,
-                        format!("Unable to recompile file: {err}."),
-                    )
-                })?;
+            if all || target_hashed != file_cache.source_hash {
+                if let Err(recompile_error) =
+                    recompile_binary(&fs::canonicalize(Path::new(&filename))?).map_err(|err| {
+                        io::Error::new(io::ErrorKind::Other, format!("Recompilation error: {err}"))
+                    })
+                {
+                    log!(error, "Recompilation failed for file '{filename}'. Error details: {recompile_error}");
+                    continue;
+                }
+
+                file_cache.source_hash = target_hashed;
                 recompiled_numbers += 1;
             }
         }
     }
+
+    put_config(config)?;
 
     log!(
         info,
