@@ -17,7 +17,7 @@ pub mod logging {
             println!("🚧: {}", format!($($arg)*).yellow());
         };
         (error, $($arg:tt)*) => {
-            println!("❌: {}", format!($($arg)*).red());
+            eprintln!("❌: {}", format!($($arg)*).red());
         };
         (question, $($arg:tt)*) => {
             print!("❓: {}", format!($($arg)*).bright_blue());
