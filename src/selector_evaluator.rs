@@ -11,10 +11,10 @@ impl fmt::Display for RangeEvaluationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             RangeEvaluationError::InvalidRangeFormat(part) => {
-                write!(f, "Invalid range format: {}", part)
+                write!(f, "Invalid range format: {part}")
             }
             RangeEvaluationError::InvalidNumber(part) => {
-                write!(f, "Invalid number: {}", part)
+                write!(f, "Invalid number: {part}")
             }
         }
     }

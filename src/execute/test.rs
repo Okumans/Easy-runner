@@ -79,8 +79,7 @@ pub fn run_at(
         log!(info, "No test found.");
         return Ok(());
     }
-    let range_tests = evaluate(expression)
-        .map_err(|err| io::Error::new(io::ErrorKind::Other, err.to_string()))?;
+    let range_tests = evaluate(expression).map_err(|err| io::Error::other(err.to_string()))?;
 
     for range_test in range_tests {
         let main_index = range_test.main_test;
@@ -123,7 +122,7 @@ pub fn run_at(
                             "Test #".purple(),
                             main_index.to_string().yellow(),
                             "completed successfully".green(),
-                            format!("{:?}", time_elapsed).green().italic()
+                            format!("{time_elapsed:?}").green().italic()
                         );
                     } else {
                         let cols = terminal::size()?.0 as usize;
@@ -133,7 +132,7 @@ pub fn run_at(
                             "* ❌ {}{}. Taking: {}\n{}\n{}\n{}\n{}\n{}\n{}",
                             "Test #".purple(),
                             main_index.to_string().yellow(),
-                            format!("{:?}", time_elapsed).green().italic(),
+                            format!("{time_elapsed:?}").green().italic(),
                             "Input:".bold(),
                             padded_string(input, cols, rows, input.lines().count() == 1).blue(),
                             "Output:".bold(),
@@ -500,7 +499,7 @@ pub fn run(src_path: &Path, force_recompile: bool, show_full: bool) -> Result<()
                         "Test #".purple(),
                         index.to_string().yellow(),
                         "completed successfully".green(),
-                        format!("{:?}", time_elapsed).green().italic()
+                        format!("{time_elapsed:?}").green().italic()
                     );
                 } else {
                     // println!(
@@ -518,7 +517,7 @@ pub fn run(src_path: &Path, force_recompile: bool, show_full: bool) -> Result<()
                         "* ❌ {}{}. Taking: {}\n{}\n{}\n{}\n{}\n{}\n{}",
                         "Test #".purple(),
                         index.to_string().yellow(),
-                        format!("{:?}", time_elapsed).green().italic(),
+                        format!("{time_elapsed:?}").green().italic(),
                         "Input:".bold(),
                         padded_string(input, cols, rows, input.lines().count() == 1).blue(),
                         "Output:".bold(),
@@ -589,7 +588,7 @@ pub fn run(src_path: &Path, force_recompile: bool, show_full: bool) -> Result<()
             }
 
             Err(error) => {
-                println!("{}", error);
+                println!("{error}");
                 0
             }
         };

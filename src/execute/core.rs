@@ -32,15 +32,15 @@ pub fn recompile_binary(src_path: &Path) -> Result<(), String> {
         .and_then(ffi::OsStr::to_str)
         .ok_or_else(|| "Failed to determine file type".to_string())?;
 
-    let mut config = get_config().map_err(|err| format!("Config error: {}", err))?;
+    let mut config = get_config().map_err(|err| format!("Config error: {err}"))?;
 
     let mut sys_call = config
         .languages_config
         .remove(file_type)
-        .ok_or_else(|| format!("File type \"{}\" is not supported.", file_type))?;
+        .ok_or_else(|| format!("File type \"{file_type}\" is not supported."))?;
 
     template_config_replacement(&mut sys_call, config.binary_dir_path.as_path(), src_path)
-        .map_err(|err| format!("Template error: {}", err))?;
+        .map_err(|err| format!("Template error: {err}"))?;
 
     let sys_call: Vec<String> =
         shell_words::split(&sys_call).map_err(|_| "Failed to parse command".to_string())?;
@@ -57,12 +57,12 @@ pub fn recompile_binary(src_path: &Path) -> Result<(), String> {
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .output()
-        .map_err(|err| format!("Command execution error: {}", err))?;
+        .map_err(|err| format!("Command execution error: {err}"))?;
 
     if output.status.success() {
         Ok(())
     } else {
-        Err(format!("Failed to compile {:?}", src_path))
+        Err(format!("Failed to compile {src_path:?}"))
     }
 }
 
@@ -95,12 +95,7 @@ pub fn execute_binary(
             ExecutionInput::CustomInput(_) => Stdio::piped(),
         })
         .spawn()
-        .map_err(|err| {
-            io::Error::new(
-                io::ErrorKind::Other,
-                format!("Failed to spawn binary: {err}"),
-            )
-        })?;
+        .map_err(|err| io::Error::other(format!("Failed to spawn binary: {err}")))?;
 
     // Handle custom input in a separate thread
     if let ExecutionInput::CustomInput(input_data) = input {
@@ -128,12 +123,9 @@ pub fn execute_binary(
             });
         }
     }
-    let output = child.wait_with_output().map_err(|err| {
-        io::Error::new(
-            io::ErrorKind::Other,
-            format!("Failed to wait for binary execution: {err}"),
-        )
-    })?;
+    let output = child
+        .wait_with_output()
+        .map_err(|err| io::Error::other(format!("Failed to wait for binary execution: {err}")))?;
 
     let elapsed = now.elapsed();
 

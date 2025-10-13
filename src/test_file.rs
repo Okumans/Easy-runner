@@ -134,11 +134,9 @@ impl Iterator for TestFileIterator {
                         self.stack -= 1;
                         match self.stack.cmp(&0) {
                             std::cmp::Ordering::Less => {
-                                return Some(Err(format!(
-                                    "Bracket mismatch at line {}",
-                                    line_count
-                                )
-                                .into()))
+                                return Some(Err(
+                                    format!("Bracket mismatch at line {line_count}",).into()
+                                ))
                             }
 
                             std::cmp::Ordering::Equal => {
@@ -246,4 +244,3 @@ pub fn merge_test_file(
 ) -> Result<MergedTestFileTterator, Box<dyn Error>> {
     MergedTestFileTterator::new(input_test_file_iterator, output_test_file_iterator)
 }
-

@@ -75,12 +75,8 @@ pub fn recompile(all: bool) -> io::Result<()> {
                 .encode(sha256_digest(io::BufReader::new(fs::File::open(filename)?))?.as_ref());
 
             if all || target_hashed != config.files.get(filename).unwrap().source_hash {
-                recompile_binary(&fs::canonicalize(Path::new(filename))?).map_err(|err| {
-                    io::Error::new(
-                        io::ErrorKind::Other,
-                        format!("Unable to recompile file: {err}."),
-                    )
-                })?;
+                recompile_binary(&fs::canonicalize(Path::new(filename))?)
+                    .map_err(|err| io::Error::other(format!("Unable to recompile file: {err}.")))?;
                 recompiled_numbers += 1;
             }
         }

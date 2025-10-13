@@ -245,7 +245,7 @@ pub fn status() -> io::Result<()> {
         return Ok(());
     }
 
-    println!("{}", format!("Tracked {} files.", tracked_numbers).blue());
+    println!("{}", format!("Tracked {tracked_numbers} files.").blue());
 
     let hash_width = cmp::min(cmp::max(0, terminal::size()?.0 as i32) - 55, 65) as usize;
 

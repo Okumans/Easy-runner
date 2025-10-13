@@ -115,7 +115,7 @@ pub fn append_extension(extension: &str, path: PathBuf) -> PathBuf {
 pub fn padded_string(content: &str, cols: usize, rows: usize, single_line: bool) -> String {
     limited_string(content, cols - 2, rows, single_line)
         .lines()
-        .map(|line| format!("  {}", line)) // Add 2 spaces padding to each line
+        .map(|line| format!("  {line}")) // Add 2 spaces padding to each line
         .collect::<Vec<String>>()
         .join("\n")
 }

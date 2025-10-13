@@ -50,7 +50,7 @@ impl Display for Test {
                 input,
                 expected_output,
             } => {
-                write!(f, "Test: ({}), Expected: ({})", input, expected_output)
+                write!(f, "Test: ({input}), Expected: ({expected_output})")
             }
             Test::RefTest {
                 input,
@@ -58,8 +58,7 @@ impl Display for Test {
             } => {
                 write!(
                     f,
-                    "Test from file: ({:?}), Expected from file: ({:?})",
-                    input, expected_output
+                    "Test from file: ({input:?}), Expected from file: ({expected_output:?})"
                 )
             }
         }
